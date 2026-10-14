@@ -1,8 +1,9 @@
 import { create } from 'zustand';
-import { SheetMusicData, ChordItem, HighlightArea, ApiConfig } from '../types';
+import { SheetMusicData, ChordItem, HighlightArea, TextBoxItem, AnnotationIconItem, ApiConfig } from '../types';
 import { DEFAULT_API_CONFIG, analyzeSheetMusicWithAI, generateSessionGuidesWithAI } from '../services/aiService';
 import { renderTransposedSheetMusic } from '../utils/canvasRenderer';
 import { saveAppState, loadAppState } from '../services/storageService';
+import { getContrastTextColor } from '../utils/colorUtils';
 
 interface SheetStoreState {
   sheets: SheetMusicData[];
@@ -10,6 +11,7 @@ interface SheetStoreState {
   showHighlights: boolean;
   isSlideMode: boolean;
   slideIndex: number;
+  isEditMode: boolean;
   theme: 'dark' | 'light';
   apiConfig: ApiConfig;
 
@@ -33,21 +35,40 @@ interface SheetStoreState {
   removeSheet: (id: string) => void;
   reorderSheets: (fromIndex: number, toIndex: number) => void;
   setActiveSheetId: (id: string) => void;
+  updateSheetTitle: (sheetId: string, title: string) => Promise<void>;
   setSheetKey: (id: string, targetKey: string) => Promise<void>;
   analyzeSheet: (id: string, forceMock?: boolean) => Promise<void>;
   generateGuides: (id: string) => Promise<void>;
   toggleHighlights: () => Promise<void>;
+  setEditMode: (mode: boolean) => void;
   
+  // 코드 아이템 관리
   addChord: (sheetId: string, chord: Omit<ChordItem, 'id'>) => Promise<void>;
   updateChord: (sheetId: string, chordId: string, chordText: string) => Promise<void>;
   moveChord: (sheetId: string, chordId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
   resizeChord: (sheetId: string, chordId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
   removeChord: (sheetId: string, chordId: string) => Promise<void>;
+
+  // 세션 가이드 하이라이트 관리
   addHighlight: (sheetId: string, hl: Omit<HighlightArea, 'id'>) => Promise<void>;
-  updateHighlight: (sheetId: string, hlId: string, label: string, color?: string) => Promise<void>;
+  updateHighlight: (sheetId: string, hlId: string, label: string, borderColor?: string, backgroundColor?: string) => Promise<void>;
   moveHighlight: (sheetId: string, hlId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
   resizeHighlight: (sheetId: string, hlId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
   removeHighlight: (sheetId: string, hlId: string) => Promise<void>;
+
+  // 글상자 (Text Box) 관리
+  addTextBox: (sheetId: string, item: Omit<TextBoxItem, 'id'>) => Promise<void>;
+  updateTextBox: (sheetId: string, boxId: string, data: Partial<TextBoxItem>) => Promise<void>;
+  moveTextBox: (sheetId: string, boxId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
+  resizeTextBox: (sheetId: string, boxId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
+  removeTextBox: (sheetId: string, boxId: string) => Promise<void>;
+
+  // 악보 기호 아이콘 (|, ✓, (, )) 관리
+  addAnnotation: (sheetId: string, item: Omit<AnnotationIconItem, 'id'>) => Promise<void>;
+  updateAnnotation: (sheetId: string, annoId: string, data: Partial<AnnotationIconItem>) => Promise<void>;
+  moveAnnotation: (sheetId: string, annoId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
+  resizeAnnotation: (sheetId: string, annoId: string, box: { x: number; y: number; width: number; height: number }) => Promise<void>;
+  removeAnnotation: (sheetId: string, annoId: string) => Promise<void>;
 
   // 슬라이드 쇼 제어
   startSlideShow: (startIndex?: number) => void;
@@ -107,6 +128,7 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
   showHighlights: true,
   isSlideMode: false,
   slideIndex: 0,
+  isEditMode: false,
   theme: initialTheme,
   apiConfig: DEFAULT_API_CONFIG,
   toastMessage: null,
@@ -120,13 +142,12 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     try {
       const saved = await loadAppState();
       if (saved && saved.sheets && saved.sheets.length > 0) {
-        const targetTheme = saved.theme || initialTheme;
-        applyThemeToDOM(targetTheme);
+        applyThemeToDOM(saved.theme || 'dark');
         set({
           sheets: saved.sheets,
           activeSheetId: saved.sheets[0]?.id || null,
           showHighlights: saved.showHighlights ?? true,
-          theme: targetTheme,
+          theme: saved.theme || 'dark',
           apiConfig: saved.apiConfig || DEFAULT_API_CONFIG,
           lastSavedAt: saved.lastSavedAt || Date.now(),
           isDirty: false,
@@ -163,7 +184,7 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
       set({
         isDirty: false,
         lastSavedAt: now,
-        autoSaveMessage: `저장 완료 (${timeStr})`,
+        autoSaveMessage: `자동 저장 완료 (${timeStr})`,
       });
     } catch (err) {
       console.error('Save to storage error:', err);
@@ -183,12 +204,25 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     set({ activeSheetId: id });
   },
 
+  setEditMode: (mode: boolean) => {
+    set({ isEditMode: mode });
+  },
+
+  updateSheetTitle: async (sheetId: string, title: string) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) => (s.id === sheetId ? { ...s, title } : s)),
+      isDirty: true,
+    }));
+    await get().saveToStorage();
+  },
+
   setTheme: (theme: 'dark' | 'light') => {
     applyThemeToDOM(theme);
     if (typeof window !== 'undefined') {
       localStorage.setItem('praise_helper_theme', theme);
     }
     set({ theme, isDirty: true });
+    // 테마 변경 즉시 저장
     get().saveToStorage();
   },
 
@@ -232,6 +266,8 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
         currentKey: 'G',
         chords: [],
         sessionHighlights: [],
+        textBoxes: [],
+        annotations: [],
         naturalWidth: img.naturalWidth || 1000,
         naturalHeight: img.naturalHeight || 1400,
         isAnalyzing: false,
@@ -290,35 +326,33 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     }
 
     const sampleChords = [
-      { text: 'G', x: 220, y: 250 },
-      { text: 'D/F#', x: 470, y: 250 },
-      { text: 'Em7', x: 720, y: 250 },
-      { text: 'Bm7', x: 970, y: 250 },
-      { text: 'C', x: 220, y: 530 },
-      { text: 'G/B', x: 470, y: 530 },
-      { text: 'Am7', x: 720, y: 530 },
-      { text: 'D7', x: 970, y: 530 },
-      { text: 'Em', x: 220, y: 810 },
-      { text: 'Cadd9', x: 470, y: 810 },
-      { text: 'G', x: 720, y: 810 },
-      { text: 'D', x: 970, y: 810 },
-      { text: 'C', x: 220, y: 1090 },
-      { text: 'D', x: 470, y: 1090 },
-      { text: 'G', x: 720, y: 1090 },
-      { text: 'G', x: 970, y: 1090 },
+      { text: 'G', x: 130, y: 250 },
+      { text: 'D/F#', x: 380, y: 250 },
+      { text: 'Em7', x: 630, y: 250 },
+      { text: 'Bm7', x: 880, y: 250 },
+      { text: 'C', x: 130, y: 530 },
+      { text: 'G/B', x: 380, y: 530 },
+      { text: 'Am7', x: 630, y: 530 },
+      { text: 'D7', x: 880, y: 530 },
+      { text: 'Em', x: 130, y: 810 },
+      { text: 'Cadd9', x: 380, y: 810 },
+      { text: 'G', x: 630, y: 810 },
+      { text: 'D', x: 880, y: 810 },
+      { text: 'C', x: 130, y: 1090 },
+      { text: 'D', x: 380, y: 1090 },
+      { text: 'G', x: 630, y: 1090 },
+      { text: 'G', x: 880, y: 1090 },
     ];
 
-    ctx.font = 'bold 28px sans-serif';
+    ctx.font = 'bold 30px sans-serif';
     ctx.fillStyle = '#0f172a';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
     for (const c of sampleChords) {
       ctx.fillText(c.text, c.x, c.y);
     }
 
     ctx.font = '22px sans-serif';
     ctx.fillStyle = '#334155';
-    ctx.textAlign = 'left';
     ctx.fillText('이 곳에 생명 샘 솟아나', 140, 395);
     ctx.fillText('눈물 골짝 지나갈 때에', 390, 395);
     ctx.fillText('머잖아 열매 맺히고', 640, 395);
@@ -333,43 +367,34 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     const img = await getOrLoadImage(dataUrl);
 
     const id = `sheet-sample-${Date.now()}`;
-    const chords: ChordItem[] = sampleChords.map((c, i) => {
-      const boxW = c.text.includes('/') || c.text.length > 3 ? 90 : 65;
-      return {
-        id: `sample-chord-${i}`,
-        chordText: c.text,
-        box: {
-          x: c.x - boxW / 2,
-          y: c.y - 18,
-          width: boxW,
-          height: 36,
-        },
-      };
-    });
+    const chords: ChordItem[] = sampleChords.map((c, i) => ({
+      id: `sample-chord-${i}`,
+      chordText: c.text,
+      box: {
+        x: c.x - 10,
+        y: c.y - 32,
+        width: 100,
+        height: 42,
+      },
+    }));
 
     const sessionHighlights: HighlightArea[] = [
       {
         id: 'sample-hl-1',
-        label: '🥁 드럼 in (Acoustic & Soft Rimshot)',
-        box: { x: 100, y: 505, width: 1000, height: 185 },
+        label: '🥁 드럼 in (소프트 림샷)',
+        box: { x: 100, y: 470, width: 1000, height: 160 },
         color: '#f59e0b',
       },
       {
         id: 'sample-hl-2',
-        label: '📈 빌드업 (베이스 & 패드 참여, 점진적 고조)',
-        box: { x: 100, y: 785, width: 1000, height: 185 },
+        label: '📈 빌드업 (베이스 & 패드 참여)',
+        box: { x: 100, y: 750, width: 1000, height: 160 },
         color: '#8b5cf6',
       },
       {
         id: 'sample-hl-3',
-        label: '🔥 풀 세션 (Full Band 코러스)',
-        box: { x: 100, y: 1065, width: 500, height: 185 },
-        color: '#10b981',
-      },
-      {
-        id: 'sample-hl-4',
-        label: '⚡ 브레이크 (피아노 솔로 & 잔잔하게)',
-        box: { x: 600, y: 1065, width: 500, height: 185 },
+        label: '⚡ 브레이크 (피아노 솔로)',
+        box: { x: 600, y: 1030, width: 500, height: 160 },
         color: '#ef4444',
       },
     ];
@@ -604,9 +629,16 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
   },
 
   addHighlight: async (sheetId: string, hl: Omit<HighlightArea, 'id'>) => {
+    const borderColor = hl.borderColor || hl.color || '#3b82f6';
+    const backgroundColor = hl.backgroundColor || 'rgba(59, 130, 246, 0.2)';
+    const textColor = hl.textColor || getContrastTextColor(backgroundColor || borderColor);
     const newHl: HighlightArea = {
       ...hl,
       id: `hl-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+      borderColor,
+      backgroundColor,
+      textColor,
+      color: borderColor,
     };
     set((state) => ({
       sheets: state.sheets.map((s) =>
@@ -618,15 +650,26 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     await get().saveToStorage();
   },
 
-  updateHighlight: async (sheetId: string, hlId: string, label: string, color?: string) => {
+  updateHighlight: async (sheetId: string, hlId: string, label: string, borderColor?: string, backgroundColor?: string) => {
     set((state) => ({
       sheets: state.sheets.map((s) =>
         s.id === sheetId
           ? {
               ...s,
-              sessionHighlights: s.sessionHighlights.map((h) =>
-                h.id === hlId ? { ...h, label, color: color || h.color } : h
-              ),
+              sessionHighlights: s.sessionHighlights.map((h) => {
+                if (h.id !== hlId) return h;
+                const nextBorder = borderColor || h.borderColor || h.color || '#3b82f6';
+                const nextBg = backgroundColor || h.backgroundColor || 'rgba(59, 130, 246, 0.2)';
+                const nextTextColor = getContrastTextColor(nextBg || nextBorder);
+                return {
+                  ...h,
+                  label,
+                  borderColor: nextBorder,
+                  backgroundColor: nextBg,
+                  textColor: nextTextColor,
+                  color: nextBorder,
+                };
+              }),
             }
           : s
       ),
@@ -677,6 +720,160 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
       sheets: state.sheets.map((s) =>
         s.id === sheetId
           ? { ...s, sessionHighlights: s.sessionHighlights.filter((h) => h.id !== hlId) }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  // 글상자 (Text Box) 관리
+  addTextBox: async (sheetId: string, item: Omit<TextBoxItem, 'id'>) => {
+    const newBox: TextBoxItem = {
+      ...item,
+      id: `tb-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+    };
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId ? { ...s, textBoxes: [...(s.textBoxes || []), newBox] } : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  updateTextBox: async (sheetId: string, boxId: string, data: Partial<TextBoxItem>) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              textBoxes: (s.textBoxes || []).map((t) => (t.id === boxId ? { ...t, ...data } : t)),
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  moveTextBox: async (sheetId: string, boxId: string, box: { x: number; y: number; width: number; height: number }) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              textBoxes: (s.textBoxes || []).map((t) => (t.id === boxId ? { ...t, box } : t)),
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  resizeTextBox: async (sheetId: string, boxId: string, box: { x: number; y: number; width: number; height: number }) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              textBoxes: (s.textBoxes || []).map((t) => (t.id === boxId ? { ...t, box } : t)),
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  removeTextBox: async (sheetId: string, boxId: string) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? { ...s, textBoxes: (s.textBoxes || []).filter((t) => t.id !== boxId) }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  // 악보 기호 아이콘 (|, ✓, (, )) 관리
+  addAnnotation: async (sheetId: string, item: Omit<AnnotationIconItem, 'id'>) => {
+    const newAnno: AnnotationIconItem = {
+      ...item,
+      id: `anno-${Date.now()}-${Math.random().toString(36).substring(2, 5)}`,
+    };
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId ? { ...s, annotations: [...(s.annotations || []), newAnno] } : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  updateAnnotation: async (sheetId: string, annoId: string, data: Partial<AnnotationIconItem>) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              annotations: (s.annotations || []).map((a) => (a.id === annoId ? { ...a, ...data } : a)),
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  moveAnnotation: async (sheetId: string, annoId: string, box: { x: number; y: number; width: number; height: number }) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              annotations: (s.annotations || []).map((a) => (a.id === annoId ? { ...a, box } : a)),
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  resizeAnnotation: async (sheetId: string, annoId: string, box: { x: number; y: number; width: number; height: number }) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              annotations: (s.annotations || []).map((a) => (a.id === annoId ? { ...a, box } : a)),
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
+  removeAnnotation: async (sheetId: string, annoId: string) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? { ...s, annotations: (s.annotations || []).filter((a) => a.id !== annoId) }
           : s
       ),
       isDirty: true,
@@ -741,6 +938,8 @@ async function reRenderSingleSheet(sheetId: string, set: any, get: any) {
       fromKey: sheet.detectedKey,
       toKey: sheet.currentKey,
       sessionHighlights: sheet.sessionHighlights,
+      textBoxes: sheet.textBoxes || [],
+      annotations: sheet.annotations || [],
       showHighlights: get().showHighlights,
     });
 

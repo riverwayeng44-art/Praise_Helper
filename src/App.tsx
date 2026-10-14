@@ -1,19 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import { useSheetStore } from './store/useSheetStore';
 import { Header } from './components/Header';
 import { QueueSidebar } from './components/QueueSidebar';
 import { EditorView } from './components/EditorView';
 import { SlideShowModal } from './components/SlideShowModal';
 import { SettingsModal } from './components/SettingsModal';
-import { useSheetStore } from './store/useSheetStore';
 import { ensureFontLoaded } from './utils/canvasRenderer';
 
 export const App: React.FC = () => {
   const { 
     initFromStorage, 
-    addSampleSheet, 
-    checkAndAutoSave, 
     saveToStorage, 
-    theme 
+    checkAndAutoSave, 
+    addSampleSheet, 
+    theme,
+    isEditMode 
   } = useSheetStore();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -56,7 +57,7 @@ export const App: React.FC = () => {
 
       {/* 2. 메인 워크스페이스 (좌측 큐 목록 + 중앙 고해상도 무손실 에디터) */}
       <div className="flex-1 flex overflow-hidden">
-        <QueueSidebar />
+        {!isEditMode && <QueueSidebar />}
         <EditorView />
       </div>
 

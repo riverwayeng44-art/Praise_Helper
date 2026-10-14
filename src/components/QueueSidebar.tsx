@@ -95,7 +95,7 @@ export const QueueSidebar: React.FC = () => {
             <FileText className="w-8 h-8 text-slate-400 dark:text-slate-600 mb-2" />
             <p className="text-xs text-slate-600 dark:text-slate-400">등록된 악보가 없습니다.</p>
             <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-              상단의 "샘플 악보 추가"를 누르거나 악보를 업로드하세요.
+              악보 이미지를 위 영역에 드래그하거나 클릭하여 추가하세요.
             </p>
           </div>
         ) : (

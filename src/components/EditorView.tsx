@@ -9,22 +9,25 @@ import {
   Music, 
   ZoomIn, 
   ZoomOut, 
-  Maximize2,
-  X,
-  Edit2,
-  Trash2,
-  Move,
-  ListFilter,
-  Check,
-  ChevronRight,
-  Eye,
-  EyeOff
+  X, 
+  Edit2, 
+  Trash2, 
+  ListFilter, 
+  Check, 
+  Eye, 
+  EyeOff,
+  Type,
+  Stamp,
+  Palette,
+  CheckCircle2
 } from 'lucide-react';
 import { useSheetStore } from '../store/useSheetStore';
 import { STANDARD_KEYS, getSemitoneDiff, extractRootNote, transposeChord, FLAT_DOMINANT_KEYS } from '../utils/transposer';
 import { AddChordModal } from './AddChordModal';
 import { AddHighlightModal } from './AddHighlightModal';
-import { ChordItem, HighlightArea } from '../types';
+import { AddTextBoxModal } from './AddTextBoxModal';
+import { AddAnnotationModal } from './AddAnnotationModal';
+import { ChordItem, HighlightArea, TextBoxItem, AnnotationIconItem, AnnotationType } from '../types';
 
 export const EditorView: React.FC = () => {
   const { 
@@ -32,7 +35,7 @@ export const EditorView: React.FC = () => {
     activeSheetId, 
     setSheetKey, 
     analyzeSheet, 
-    generateGuides,
+    updateSheetTitle,
     addChord, 
     updateChord,
     moveChord,
@@ -43,32 +46,54 @@ export const EditorView: React.FC = () => {
     moveHighlight,
     resizeHighlight,
     removeHighlight,
-    startSlideShow, 
-    addSampleSheet,
+    addTextBox,
+    updateTextBox,
+    moveTextBox,
+    resizeTextBox,
+    removeTextBox,
+    addAnnotation,
+    updateAnnotation,
+    moveAnnotation,
+    resizeAnnotation,
+    removeAnnotation,
     showHighlights,
     toggleHighlights,
     toastMessage,
-    setToastMessage
+    setToastMessage,
+    isEditMode,
+    setEditMode
   } = useSheetStore();
 
   const activeSheet = sheets.find((s) => s.id === activeSheetId);
 
+  // 인라인 제목 편집 상태 (NotebookLM 스타일)
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+
   // 모달 상태
   const [isChordModalOpen, setIsChordModalOpen] = useState(false);
   const [isHighlightModalOpen, setIsHighlightModalOpen] = useState(false);
+  const [isTextBoxModalOpen, setIsTextBoxModalOpen] = useState(false);
+  const [isAnnotationModalOpen, setIsAnnotationModalOpen] = useState(false);
+
+  // 선택 영역 드래그 박스 (신규 추가용)
   const [selectionBox, setSelectionBox] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  // 선택된 요소 (코드 또는 하이라이트)
+  // 선택된 요소 ID
   const [selectedChordId, setSelectedChordId] = useState<string | null>(null);
   const [selectedHighlightId, setSelectedHighlightId] = useState<string | null>(null);
+  const [selectedTextBoxId, setSelectedTextBoxId] = useState<string | null>(null);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
 
-  // 인라인 수정 모달 상태
+  // 모달 수정 대상 아이템
   const [editingChord, setEditingChord] = useState<{ id: string; text: string } | null>(null);
-  const [editingHighlight, setEditingHighlight] = useState<{ id: string; label: string } | null>(null);
+  const [editingHighlight, setEditingHighlight] = useState<HighlightArea | null>(null);
+  const [editingTextBox, setEditingTextBox] = useState<TextBoxItem | null>(null);
+  const [editingAnnotation, setEditingAnnotation] = useState<AnnotationIconItem | null>(null);
 
-  // 우측 요소 관리 패널 열림 여부
+  // 우측 요소 관리 패널 열림 여부 및 활성 탭
   const [isSidePanelOpen, setIsSidePanelOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'chords' | 'highlights'>('chords');
+  const [activeTab, setActiveTab] = useState<'chords' | 'highlights' | 'textBoxes' | 'annotations'>('chords');
 
   // 줌 레벨
   const [zoom, setZoom] = useState(1);
@@ -80,7 +105,7 @@ export const EditorView: React.FC = () => {
 
   // 요소 드래그 이동 상태 (60fps 로컬 오버레이 추적)
   const [dragState, setDragState] = useState<{
-    type: 'chord' | 'highlight';
+    type: 'chord' | 'highlight' | 'textBox' | 'annotation';
     id: string;
     startX: number;
     startY: number;
@@ -90,9 +115,9 @@ export const EditorView: React.FC = () => {
 
   // 요소 크기 조절 (Resize) 상태 (60fps 로컬 오버레이 추적)
   const [resizeState, setResizeState] = useState<{
-    type: 'chord' | 'highlight';
+    type: 'chord' | 'highlight' | 'textBox' | 'annotation';
     id: string;
-    handle: string; // 'nw' | 'ne' | 'se' | 'sw' | 'n' | 's' | 'e' | 'w'
+    handle: string;
     startX: number;
     startY: number;
     origBox: { x: number; y: number; width: number; height: number };
@@ -109,15 +134,20 @@ export const EditorView: React.FC = () => {
     setCurrentBox(null);
     setSelectedChordId(null);
     setSelectedHighlightId(null);
+    setSelectedTextBoxId(null);
+    setSelectedAnnotationId(null);
     setIsSelecting(false);
     setDragState(null);
     setResizeState(null);
+    if (activeSheet) {
+      setTitleInput(activeSheet.title);
+      setIsEditingTitle(false);
+    }
   }, [activeSheetId]);
 
   // F11 전체화면 & ESC 취소 & Delete/Backspace 키보드 삭제 핸들러
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 텍스트 입력 중일 때는 Delete/Backspace 등 기본 동작 유지
       const target = e.target as HTMLElement;
       const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
 
@@ -138,9 +168,12 @@ export const EditorView: React.FC = () => {
         setCurrentBox(null);
         setSelectedChordId(null);
         setSelectedHighlightId(null);
+        setSelectedTextBoxId(null);
+        setSelectedAnnotationId(null);
         setIsSelecting(false);
         setDragState(null);
         setResizeState(null);
+        setIsEditingTitle(false);
       } else if (!isInput && (e.key === 'Delete' || e.key === 'Backspace')) {
         if (activeSheet) {
           if (selectedChordId) {
@@ -151,34 +184,34 @@ export const EditorView: React.FC = () => {
             e.preventDefault();
             removeHighlight(activeSheet.id, selectedHighlightId);
             setSelectedHighlightId(null);
+          } else if (selectedTextBoxId) {
+            e.preventDefault();
+            removeTextBox(activeSheet.id, selectedTextBoxId);
+            setSelectedTextBoxId(null);
+          } else if (selectedAnnotationId) {
+            e.preventDefault();
+            removeAnnotation(activeSheet.id, selectedAnnotationId);
+            setSelectedAnnotationId(null);
           }
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeSheet, selectedChordId, selectedHighlightId, removeChord, removeHighlight]);
+  }, [activeSheet, selectedChordId, selectedHighlightId, selectedTextBoxId, selectedAnnotationId, removeChord, removeHighlight, removeTextBox, removeAnnotation]);
 
   if (!activeSheet) {
     return (
-      <main className="flex-1 h-full bg-slate-100 dark:bg-slate-950 flex flex-col items-center justify-center p-8 select-none transition-colors duration-200">
-        <div className="max-w-md w-full text-center space-y-4 p-8 rounded-3xl bg-white dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 shadow-xl">
+      <main className="flex-1 h-full bg-slate-100 dark:bg-zinc-950 flex flex-col items-center justify-center p-8 select-none transition-colors duration-200">
+        <div className="max-w-md w-full text-center space-y-4 p-8 rounded-3xl bg-white dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 shadow-xl">
           <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 mx-auto flex items-center justify-center shadow-inner">
             <Music className="w-8 h-8" />
           </div>
-          <h2 className="text-xl font-bold text-slate-900 dark:text-slate-100">선택된 악보가 없습니다</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-zinc-100 font-['Jua']">선택된 악보가 없습니다</h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
             좌측 큐에서 악보를 선택하거나, 새로운 악보 이미지를 업로드하세요.
             찬양팀을 위한 무손실 키 변경과 세션 가이드가 자동으로 적용됩니다.
           </p>
-          <div className="pt-2 flex justify-center gap-3">
-            <button
-              onClick={() => addSampleSheet()}
-              className="px-4 py-2.5 text-xs font-bold rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-colors shadow-lg shadow-emerald-500/20"
-            >
-              예시 찬양 악보 불러오기
-            </button>
-          </div>
         </div>
       </main>
     );
@@ -186,6 +219,13 @@ export const EditorView: React.FC = () => {
 
   const semiDiff = getSemitoneDiff(activeSheet.detectedKey, activeSheet.currentKey);
   const preferFlat = FLAT_DOMINANT_KEYS.has(activeSheet.currentKey);
+
+  const handleFinishTitleEdit = () => {
+    if (activeSheet && titleInput.trim() && titleInput.trim() !== activeSheet.title) {
+      updateSheetTitle(activeSheet.id, titleInput.trim());
+    }
+    setIsEditingTitle(false);
+  };
 
   const handleShiftSemitone = (delta: number) => {
     const currentRoot = extractRootNote(activeSheet.currentKey);
@@ -195,6 +235,7 @@ export const EditorView: React.FC = () => {
     setSheetKey(activeSheet.id, STANDARD_KEYS[nextIndex]);
   };
 
+  // '이미지 저장' (무손실 내보내기)
   const handleExportPng = () => {
     const downloadUrl = activeSheet.transposedImageUrl || activeSheet.originalImageUrl;
     const link = document.createElement('a');
@@ -210,7 +251,6 @@ export const EditorView: React.FC = () => {
     if (!imageRef.current) return;
     if (e.button !== 0) return;
 
-    // 만약 요소를 잡고 드래그 중이거나 리사이즈 중인 경우는 무시
     if (dragState || resizeState) return;
 
     const rect = imageRef.current.getBoundingClientRect();
@@ -224,6 +264,8 @@ export const EditorView: React.FC = () => {
     setCurrentBox(null);
     setSelectedChordId(null);
     setSelectedHighlightId(null);
+    setSelectedTextBoxId(null);
+    setSelectedAnnotationId(null);
 
     setIsSelecting(true);
     setStartPos({ x: x * scaleX, y: y * scaleY });
@@ -236,7 +278,7 @@ export const EditorView: React.FC = () => {
     const scaleX = (activeSheet.naturalWidth / rect.width) * zoom;
     const scaleY = (activeSheet.naturalHeight / rect.height) * zoom;
 
-    // 1. 요소 크기 조절 (Resize) 중인 경우 - 로컬 60fps 추적
+    // 1. 요소 크기 조절 (Resize)
     if (resizeState) {
       const deltaX = (e.clientX - resizeState.startX) * scaleX;
       const deltaY = (e.clientY - resizeState.startY) * scaleY;
@@ -248,22 +290,18 @@ export const EditorView: React.FC = () => {
       let newH = orig.height;
 
       const handle = resizeState.handle;
-      if (handle.includes('e')) {
-        newW = Math.max(30, orig.width + deltaX);
-      }
-      if (handle.includes('s')) {
-        newH = Math.max(20, orig.height + deltaY);
-      }
+      if (handle.includes('e')) newW = Math.max(20, orig.width + deltaX);
+      if (handle.includes('s')) newH = Math.max(16, orig.height + deltaY);
       if (handle.includes('w')) {
         const potentialW = orig.width - deltaX;
-        if (potentialW >= 30) {
+        if (potentialW >= 20) {
           newX = orig.x + deltaX;
           newW = potentialW;
         }
       }
       if (handle.includes('n')) {
         const potentialH = orig.height - deltaY;
-        if (potentialH >= 20) {
+        if (potentialH >= 16) {
           newY = orig.y + deltaY;
           newH = potentialH;
         }
@@ -276,7 +314,7 @@ export const EditorView: React.FC = () => {
       return;
     }
 
-    // 2. 요소 드래그 이동 중인 경우 - 로컬 60fps 추적
+    // 2. 요소 드래그 이동
     if (dragState) {
       const deltaX = (e.clientX - dragState.startX) * scaleX;
       const deltaY = (e.clientY - dragState.startY) * scaleY;
@@ -295,7 +333,7 @@ export const EditorView: React.FC = () => {
       return;
     }
 
-    // 3. 신규 영역 드래그 선택 중인 경우
+    // 3. 신규 영역 드래그 선택
     if (isSelecting && startPos) {
       const x = (e.clientX - rect.left) / zoom;
       const y = (e.clientY - rect.top) / zoom;
@@ -313,33 +351,31 @@ export const EditorView: React.FC = () => {
   };
 
   const handleCanvasMouseUp = () => {
-    // 1. 리사이즈 완료 시점에만 스토어 업데이트 (단 1회 Canvas 갱신 및 DB 저장)
+    // 1. 리사이즈 완료 시 저장
     if (resizeState) {
       const { type, id, currentBox } = resizeState;
-      if (type === 'chord') {
-        resizeChord(activeSheet.id, id, currentBox);
-      } else {
-        resizeHighlight(activeSheet.id, id, currentBox);
-      }
+      if (type === 'chord') resizeChord(activeSheet.id, id, currentBox);
+      else if (type === 'highlight') resizeHighlight(activeSheet.id, id, currentBox);
+      else if (type === 'textBox') resizeTextBox(activeSheet.id, id, currentBox);
+      else if (type === 'annotation') resizeAnnotation(activeSheet.id, id, currentBox);
       setResizeState(null);
       return;
     }
 
-    // 2. 드래그 이동 완료 시점에만 스토어 업데이트 (단 1회 Canvas 갱신 및 DB 저장)
+    // 2. 드래그 이동 완료 시 저장
     if (dragState) {
       const { type, id, currentBox } = dragState;
-      if (type === 'chord') {
-        moveChord(activeSheet.id, id, currentBox);
-      } else {
-        moveHighlight(activeSheet.id, id, currentBox);
-      }
+      if (type === 'chord') moveChord(activeSheet.id, id, currentBox);
+      else if (type === 'highlight') moveHighlight(activeSheet.id, id, currentBox);
+      else if (type === 'textBox') moveTextBox(activeSheet.id, id, currentBox);
+      else if (type === 'annotation') moveAnnotation(activeSheet.id, id, currentBox);
       setDragState(null);
       return;
     }
 
     // 3. 신규 선택 영역 확정
     if (isSelecting) {
-      if (currentBox && currentBox.width > 25 && currentBox.height > 18) {
+      if (currentBox && currentBox.width > 20 && currentBox.height > 15) {
         setSelectionBox(currentBox);
       } else {
         setSelectionBox(null);
@@ -352,20 +388,17 @@ export const EditorView: React.FC = () => {
   // 요소 드래그 시작 핸들러
   const handleItemDragStart = (
     e: React.MouseEvent,
-    type: 'chord' | 'highlight',
+    type: 'chord' | 'highlight' | 'textBox' | 'annotation',
     id: string,
     box: { x: number; y: number; width: number; height: number }
   ) => {
     e.stopPropagation();
     if (e.button !== 0) return;
 
-    if (type === 'chord') {
-      setSelectedChordId(id);
-      setSelectedHighlightId(null);
-    } else {
-      setSelectedHighlightId(id);
-      setSelectedChordId(null);
-    }
+    setSelectedChordId(type === 'chord' ? id : null);
+    setSelectedHighlightId(type === 'highlight' ? id : null);
+    setSelectedTextBoxId(type === 'textBox' ? id : null);
+    setSelectedAnnotationId(type === 'annotation' ? id : null);
 
     setDragState({
       type,
@@ -377,10 +410,10 @@ export const EditorView: React.FC = () => {
     });
   };
 
-  // 요소 리사이즈 핸들 드래그 시작 핸들러
+  // 요소 리사이즈 핸들 드래그 시작
   const handleResizeStart = (
     e: React.MouseEvent,
-    type: 'chord' | 'highlight',
+    type: 'chord' | 'highlight' | 'textBox' | 'annotation',
     id: string,
     handle: string,
     box: { x: number; y: number; width: number; height: number }
@@ -399,61 +432,37 @@ export const EditorView: React.FC = () => {
     });
   };
 
-  // PowerPoint 스타일 리사이즈 핸들 렌더링 헬퍼
+  // PowerPoint 스타일 리사이즈 핸들 렌더링
   const renderResizeHandles = (
-    type: 'chord' | 'highlight',
+    type: 'chord' | 'highlight' | 'textBox' | 'annotation',
     id: string,
     box: { x: number; y: number; width: number; height: number }
   ) => {
     const handleClass = "absolute w-2.5 h-2.5 bg-white border border-slate-900 rounded-sm shadow-md z-40";
     return (
       <>
-        {/* 모서리 핸들 4개 */}
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'nw', box)}
-          className={`${handleClass} -top-1.5 -left-1.5 cursor-nwse-resize`}
-        />
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'ne', box)}
-          className={`${handleClass} -top-1.5 -right-1.5 cursor-nesw-resize`}
-        />
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'se', box)}
-          className={`${handleClass} -bottom-1.5 -right-1.5 cursor-nwse-resize`}
-        />
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'sw', box)}
-          className={`${handleClass} -bottom-1.5 -left-1.5 cursor-nesw-resize`}
-        />
-        {/* 변 핸들 4개 */}
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'n', box)}
-          className={`${handleClass} -top-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize`}
-        />
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 's', box)}
-          className={`${handleClass} -bottom-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize`}
-        />
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'w', box)}
-          className={`${handleClass} top-1/2 -left-1.5 -translate-y-1/2 cursor-ew-resize`}
-        />
-        <div
-          onMouseDown={(e) => handleResizeStart(e, type, id, 'e', box)}
-          className={`${handleClass} top-1/2 -right-1.5 -translate-y-1/2 cursor-ew-resize`}
-        />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'nw', box)} className={`${handleClass} -top-1.5 -left-1.5 cursor-nwse-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'ne', box)} className={`${handleClass} -top-1.5 -right-1.5 cursor-nesw-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'se', box)} className={`${handleClass} -bottom-1.5 -right-1.5 cursor-nwse-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'sw', box)} className={`${handleClass} -bottom-1.5 -left-1.5 cursor-nesw-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'n', box)} className={`${handleClass} -top-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 's', box)} className={`${handleClass} -bottom-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'w', box)} className={`${handleClass} top-1/2 -left-1.5 -translate-y-1/2 cursor-ew-resize`} />
+        <div onMouseDown={(e) => handleResizeStart(e, type, id, 'e', box)} className={`${handleClass} top-1/2 -right-1.5 -translate-y-1/2 cursor-ew-resize`} />
       </>
     );
   };
 
   const activeSheetIndex = sheets.findIndex((s) => s.id === activeSheetId);
+  const textBoxesList = activeSheet.textBoxes || [];
+  const annotationsList = activeSheet.annotations || [];
 
   return (
-    <main className="flex-1 h-full bg-slate-100 dark:bg-slate-950 flex flex-col min-w-0 select-none overflow-hidden transition-colors duration-200 relative">
+    <main className="flex-1 h-full bg-slate-100 dark:bg-zinc-950 flex flex-col min-w-0 select-none overflow-hidden transition-colors duration-200 relative">
       {/* 실시간 알림 토스트 팝업 */}
       {toastMessage && (
         <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white border border-slate-700/80 px-4 py-2 rounded-xl shadow-2xl flex items-center gap-2 backdrop-blur-md animate-in fade-in slide-in-from-top duration-200">
-          <span className="text-xs font-bold">{toastMessage}</span>
+          <span className="text-xs font-bold font-['Jua'] tracking-wide">{toastMessage}</span>
           <button 
             onClick={() => setToastMessage(null)}
             className="p-0.5 text-slate-400 hover:text-white rounded"
@@ -463,32 +472,65 @@ export const EditorView: React.FC = () => {
         </div>
       )}
 
-      {/* 1. 상단 메인 툴바 */}
+      {/* 1. 상단 툴바 영역 */}
       <div className="bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 p-3.5 space-y-2.5 transition-colors duration-200 shadow-sm z-20">
-        {/* 상단 1행 */}
+        {/* 상단 1행: 악보 정보 & 제목 인라인 수정 (NotebookLM) & 주요 액션 */}
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="px-2 py-0.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs shadow-sm">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            <span className="px-2.5 py-0.8 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs shadow-sm font-['Jua'] flex-shrink-0">
               {activeSheetIndex !== -1 ? `${activeSheetIndex + 1}번곡` : '악보'}
             </span>
-            <h2 className="text-base font-bold text-slate-900 dark:text-zinc-100 truncate">
-              {activeSheet.title}
-            </h2>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono">
-              원곡: {activeSheet.detectedKey} Key
+
+            {/* NotebookLM 스타일 제목 인라인 클릭 수정 */}
+            {isEditingTitle ? (
+              <input
+                type="text"
+                value={titleInput}
+                onChange={(e) => setTitleInput(e.target.value)}
+                onBlur={handleFinishTitleEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleFinishTitleEdit();
+                  if (e.key === 'Escape') {
+                    setTitleInput(activeSheet.title);
+                    setIsEditingTitle(false);
+                  }
+                }}
+                autoFocus
+                className="px-2 py-0.5 text-base font-bold text-slate-900 dark:text-white bg-slate-100 dark:bg-slate-800 border-2 border-emerald-500 rounded-lg outline-none font-['Jua'] tracking-wide max-w-sm"
+              />
+            ) : (
+              <div
+                onClick={() => {
+                  setTitleInput(activeSheet.title);
+                  setIsEditingTitle(true);
+                }}
+                className="group flex items-center gap-1.5 cursor-pointer px-2 py-0.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors max-w-md truncate"
+                title="클릭하여 악보 제목 수정 (NotebookLM 방식)"
+              >
+                <h2 className="text-base font-bold text-slate-900 dark:text-white truncate font-['Jua'] tracking-wide">
+                  {activeSheet.title}
+                </h2>
+                <Edit2 className="w-3.5 h-3.5 text-slate-400 group-hover:text-emerald-500 transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0" />
+              </div>
+            )}
+
+            {/* Jua 폰트가 적용된 원곡 & 연주 Key 배지 */}
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-['Jua'] tracking-wider flex-shrink-0">
+              원곡 : {activeSheet.detectedKey} Key
             </span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-mono font-bold">
-              연주: {activeSheet.currentKey} Key
+            <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30 font-['Jua'] tracking-wider font-bold flex-shrink-0">
+              연주 : {activeSheet.currentKey} Key
             </span>
             {semiDiff !== 0 && (
-              <span className="text-xs px-2 py-0.5 rounded-md bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-mono font-bold">
+              <span className="text-xs px-2 py-0.5 rounded-md bg-amber-500/10 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-['Jua'] font-bold flex-shrink-0">
                 {semiDiff > 0 ? `+${semiDiff}` : semiDiff} 반음 전조
               </span>
             )}
           </div>
 
+          {/* 우측 주요 버튼들 */}
           <div className="flex items-center gap-2">
-            {/* 세션 가이드 표시 ON / OFF 토글 버튼 */}
+            {/* 세션 가이드 표시 ON / OFF 토글 */}
             <button
               onClick={() => toggleHighlights()}
               className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-bold border transition-all ${
@@ -499,10 +541,10 @@ export const EditorView: React.FC = () => {
               title="악보 위 세션 가이드 하이라이트 표시 켜기/끄기"
             >
               {showHighlights ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-              <span>세션 가이드 {showHighlights ? 'ON' : 'OFF'}</span>
+              <span className="font-['Jua']">세션 가이드 {showHighlights ? 'ON' : 'OFF'}</span>
             </button>
 
-            {/* AI 악보 코드 전수 분석 버튼 */}
+            {/* AI 악보 코드 전수 분석 */}
             <button
               onClick={() => analyzeSheet(activeSheet.id)}
               disabled={activeSheet.isAnalyzing}
@@ -514,144 +556,187 @@ export const EditorView: React.FC = () => {
               title={`${activeSheet.title}의 모든 코드를 정밀 분석하여 원터치 키 체인지를 활성화합니다`}
             >
               <Sparkles className={`w-3.5 h-3.5 ${activeSheet.isAnalyzing ? 'animate-spin' : ''}`} />
-              <span>{activeSheet.isAnalyzing ? '분석 중...' : `AI 코드 전수 분석 (${activeSheetIndex + 1}번곡)`}</span>
+              <span className="font-['Jua']">{activeSheet.isAnalyzing ? '분석 중...' : `AI 코드 전수 분석 (${activeSheetIndex + 1}번곡)`}</span>
             </button>
 
-            {/* AI 자동 가이드 생성 버튼 (신규 분리 기능) */}
-            <button
-              onClick={() => generateGuides(activeSheet.id)}
-              disabled={activeSheet.isAnalyzing}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/40 text-amber-700 dark:text-amber-300 transition-all hover:border-amber-500"
-              title="악보의 연주 흐름(드럼 in, 브레이크, 빌드업 등)을 분석하여 세션 가이드만 생성합니다"
-            >
-              <Bookmark className="w-3.5 h-3.5" />
-              <span>AI 자동 가이드 생성</span>
-            </button>
-
-            {/* 수동 코드 추가 */}
-            <button
-              onClick={() => {
-                setSelectionBox(null);
-                setIsChordModalOpen(true);
-              }}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors font-medium"
-              title="원하는 코드를 직접 추가합니다 (추가 후 마우스로 자유롭게 이동 가능)"
-            >
-              <Hash className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              <span>+ 코드 추가</span>
-            </button>
-
-            {/* 수동 가이드 추가 */}
-            <button
-              onClick={() => {
-                setSelectionBox(null);
-                setIsHighlightModalOpen(true);
-              }}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors font-medium"
-              title="세션 연주 가이드(드럼 in, 브레이크 등)를 추가합니다"
-            >
-              <Bookmark className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-              <span>+ 가이드 추가</span>
-            </button>
-
-            {/* 요소 관리 패널 토글 */}
-            <button
-              onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
-              className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors font-medium ${
-                isSidePanelOpen
-                  ? 'bg-emerald-500 text-slate-950 border-emerald-500 font-bold'
-                  : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700'
-              }`}
-              title="현재 악보의 코드 및 세션 가이드 목록을 열고 수정/삭제합니다"
-            >
-              <ListFilter className="w-3.5 h-3.5" />
-              <span>요소 목록 ({activeSheet.chords.length}코드)</span>
-            </button>
-
-            {/* 무손실 내보내기 */}
+            {/* 이미지 저장 (명칭 변경) */}
             <button
               onClick={handleExportPng}
-              className="flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors"
-              title="무손실 고화질 악보 이미지로 저장"
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors font-bold shadow-sm"
+              title="현재 키로 전조된 악보를 고화질 이미지 파일로 저장합니다"
             >
               <Download className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-              <span>무손실 저장</span>
+              <span className="font-['Jua']">이미지 저장</span>
             </button>
 
-            {/* 풀스크린 슬라이드 쇼 */}
-            <button
-              onClick={() => startSlideShow()}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-colors shadow-md shadow-emerald-500/20"
-            >
-              <Maximize2 className="w-3.5 h-3.5" />
-              <span>PPT 슬라이드 (F11)</span>
-            </button>
-          </div>
-        </div>
-
-        {/* 상단 2행: 12 Key Selector */}
-        <div className="flex items-center gap-3 pt-1 border-t border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
-            <ArrowLeftRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-            <span>원터치 키 체인지:</span>
-          </div>
-
-          <div className="flex items-center gap-1 overflow-x-auto py-0.5">
-            {STANDARD_KEYS.map((k) => {
-              const isSelected = activeSheet.currentKey === k;
-              const isOriginal = activeSheet.detectedKey === k;
-
-              return (
-                <button
-                  key={k}
-                  onClick={() => setSheetKey(activeSheet.id, k)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition-all relative ${
-                    isSelected
-                      ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/25 scale-105'
-                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/60'
-                  }`}
-                >
-                  {k}
-                  {isOriginal && (
-                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 border border-white dark:border-slate-900" title="원곡 키" />
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-slate-800">
-            <button
-              onClick={() => handleShiftSemitone(-1)}
-              className="px-2 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold"
-              title="-1 반음 (♭)"
-            >
-              -1♭
-            </button>
-            <button
-              onClick={() => handleShiftSemitone(1)}
-              className="px-2 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold"
-              title="+1 반음 (♯)"
-            >
-              +1♯
-            </button>
-            {semiDiff !== 0 && (
+            {/* '악보 편집 모드' 대형 전환 버튼 (일반 모드일 때만 크게 노출) */}
+            {!isEditMode && (
               <button
-                onClick={() => setSheetKey(activeSheet.id, activeSheet.detectedKey)}
-                className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-medium"
-                title="원곡 키로 되돌리기"
+                onClick={() => setEditMode(true)}
+                className="flex items-center gap-2 px-4 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-500 hover:to-pink-500 text-white shadow-lg shadow-indigo-500/25 active:scale-95 transition-all"
+                title="사이드바를 숨기고 악보를 화면 가득 확대하여 코드, 가이드, 글상자, 기호를 자유롭게 편집합니다"
               >
-                <RotateCcw className="w-3 h-3" />
-                <span>원키</span>
+                <Palette className="w-4 h-4" />
+                <span className="font-['Jua'] text-sm tracking-wide">🎨 악보 편집 모드</span>
               </button>
             )}
           </div>
         </div>
+
+        {/* 악보 편집 모드 진입 시 전용 상단 툴바 표시 */}
+        {isEditMode ? (
+          <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/60 dark:to-purple-950/50 p-2.5 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-sm animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold font-['Jua'] flex items-center gap-1.5 shadow-sm">
+                <Palette className="w-3.5 h-3.5 animate-pulse" />
+                악보 편집 모드
+              </span>
+              <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">
+                원하는 요소를 추가하고, 마우스로 드래그하여 위치 및 크기를 자유롭게 변경하세요. (Delete키로 삭제)
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* + 코드 추가 */}
+              <button
+                onClick={() => {
+                  setSelectionBox(null);
+                  setIsChordModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-zinc-100 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 border border-slate-300 dark:border-slate-700 hover:border-emerald-500 transition-colors font-bold font-['Jua'] shadow-sm"
+              >
+                <Hash className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>+ 코드 추가</span>
+              </button>
+
+              {/* + 가이드 추가 */}
+              <button
+                onClick={() => {
+                  setSelectionBox(null);
+                  setEditingHighlight(null);
+                  setIsHighlightModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-zinc-100 hover:bg-amber-50 dark:hover:bg-amber-950/40 border border-slate-300 dark:border-slate-700 hover:border-amber-500 transition-colors font-bold font-['Jua'] shadow-sm"
+              >
+                <Bookmark className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>+ 가이드 추가</span>
+              </button>
+
+              {/* + 글상자 추가 */}
+              <button
+                onClick={() => {
+                  setSelectionBox(null);
+                  setEditingTextBox(null);
+                  setIsTextBoxModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-zinc-100 hover:bg-blue-50 dark:hover:bg-blue-950/40 border border-slate-300 dark:border-slate-700 hover:border-blue-500 transition-colors font-bold font-['Jua'] shadow-sm"
+              >
+                <Type className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span>+ 글상자 추가</span>
+              </button>
+
+              {/* + 아이콘 추가 */}
+              <button
+                onClick={() => {
+                  setSelectionBox(null);
+                  setEditingAnnotation(null);
+                  setIsAnnotationModalOpen(true);
+                }}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-slate-800 text-slate-800 dark:text-zinc-100 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 border border-slate-300 dark:border-slate-700 hover:border-indigo-500 transition-colors font-bold font-['Jua'] shadow-sm"
+              >
+                <Stamp className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                <span>+ 아이콘 추가</span>
+              </button>
+
+              {/* 요소 목록 관리 패널 토글 */}
+              <button
+                onClick={() => setIsSidePanelOpen(!isSidePanelOpen)}
+                className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg border transition-colors font-bold font-['Jua'] shadow-sm ${
+                  isSidePanelOpen
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700'
+                }`}
+              >
+                <ListFilter className="w-3.5 h-3.5" />
+                <span>요소 목록</span>
+              </button>
+
+              {/* ✓ 편집 완료 버튼 */}
+              <button
+                onClick={() => setEditMode(false)}
+                className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow-md active:scale-95 transition-all font-['Jua']"
+                title="편집을 마치고 메인 콘티 화면으로 돌아갑니다"
+              >
+                <Check className="w-4 h-4" />
+                <span>✓ 편집 완료</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* 상단 2행: 12 Key Selector */
+          <div className="flex items-center gap-3 pt-1 border-t border-slate-200 dark:border-zinc-800">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+              <ArrowLeftRight className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <span className="font-['Jua']">원터치 키 체인지:</span>
+            </div>
+
+            <div className="flex items-center gap-1 overflow-x-auto py-0.5">
+              {STANDARD_KEYS.map((k) => {
+                const isSelected = activeSheet.currentKey === k;
+                const isOriginal = activeSheet.detectedKey === k;
+
+                return (
+                  <button
+                    key={k}
+                    onClick={() => setSheetKey(activeSheet.id, k)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition-all relative ${
+                      isSelected
+                        ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/25 scale-105'
+                        : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800/80 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/60'
+                    }`}
+                  >
+                    {k}
+                    {isOriginal && (
+                      <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-amber-500 border border-white dark:border-slate-900" title="원곡 키" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center gap-1 pl-2 border-l border-slate-200 dark:border-zinc-800">
+              <button
+                onClick={() => handleShiftSemitone(-1)}
+                className="px-2 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold"
+                title="-1 반음 (♭)"
+              >
+                -1♭
+              </button>
+              <button
+                onClick={() => handleShiftSemitone(1)}
+                className="px-2 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-bold"
+                title="+1 반음 (♯)"
+              >
+                +1♯
+              </button>
+              {semiDiff !== 0 && (
+                <button
+                  onClick={() => setSheetKey(activeSheet.id, activeSheet.detectedKey)}
+                  className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30 font-medium font-['Jua']"
+                  title="원곡 키로 되돌리기"
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>원키</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 2. 메인 워크스페이스 (중앙 캔버스 + 우측 요소 관리 패널) */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* 캔버스 스크롤 컨테이너 (하단 잘림 없이 맨 끝까지 온전히 스크롤 가능) */}
+        {/* 캔버스 스크롤 컨테이너 */}
         <div 
           ref={containerRef}
           onMouseDown={(e) => {
@@ -660,9 +745,11 @@ export const EditorView: React.FC = () => {
               setCurrentBox(null);
               setSelectedChordId(null);
               setSelectedHighlightId(null);
+              setSelectedTextBoxId(null);
+              setSelectedAnnotationId(null);
             }
           }}
-          className="flex-1 overflow-auto bg-slate-100 dark:bg-zinc-950 p-6 flex flex-col items-center justify-start transition-colors duration-200"
+          className="flex-1 overflow-auto bg-slate-200 dark:bg-zinc-950 p-6 flex flex-col items-center justify-start transition-colors duration-200"
         >
           {/* 악보 이미지 및 대화형 오버레이 레이어 */}
           <div 
@@ -684,9 +771,8 @@ export const EditorView: React.FC = () => {
               draggable={false}
             />
 
-            {/* 대화형 인터랙티브 코드 박스 레이어 (클릭, 드래그 이동, 리사이즈, 수정, 삭제) */}
+            {/* 대화형 인터랙티브 코드 박스 레이어 */}
             {activeSheet.chords.map((chord) => {
-              // 현재 실시간 이동 중이거나 리사이즈 중인 경우 로컬 실시간 박스 우선 적용 (60fps)
               let activeBox = chord.box;
               if (dragState && dragState.type === 'chord' && dragState.id === chord.id) {
                 activeBox = dragState.currentBox;
@@ -721,10 +807,8 @@ export const EditorView: React.FC = () => {
                   }}
                   title={`코드: ${displayChord} (드래그 이동 / 핸들 크기조절 / Delete키 삭제)`}
                 >
-                  {/* PowerPoint 스타일 리사이즈 핸들 */}
                   {isSelected && renderResizeHandles('chord', chord.id, { x: bx, y: by, width: bw, height: bh })}
 
-                  {/* 선택 시 미니 액션 툴바 */}
                   {isSelected && (
                     <div 
                       onMouseDown={(e) => e.stopPropagation()}
@@ -770,9 +854,8 @@ export const EditorView: React.FC = () => {
               );
             })}
 
-            {/* 대화형 인터랙티브 세션 가이드 레이어 (클릭, 드래그 이동, 리사이즈, 수정, 삭제) */}
+            {/* 대화형 인터랙티브 세션 가이드 레이어 */}
             {activeSheet.sessionHighlights.map((hl) => {
-              // 현재 실시간 이동 중이거나 리사이즈 중인 경우 로컬 실시간 박스 우선 적용 (60fps)
               let activeBox = hl.box;
               if (dragState && dragState.type === 'highlight' && dragState.id === hl.id) {
                 activeBox = dragState.currentBox;
@@ -804,24 +887,23 @@ export const EditorView: React.FC = () => {
                   }}
                   title={`세션 가이드: ${hl.label} (드래그 이동 / 핸들 크기조절 / Delete키 삭제)`}
                 >
-                  {/* PowerPoint 스타일 리사이즈 핸들 */}
                   {isSelected && renderResizeHandles('highlight', hl.id, { x: hx, y: hy, width: hw, height: hh })}
 
-                  {/* 선택 시 미니 액션 툴바 */}
                   {isSelected && (
                     <div 
                       onMouseDown={(e) => e.stopPropagation()}
                       className="absolute -top-9 left-2 z-50 bg-slate-900 text-white rounded-lg px-2.5 py-1 text-xs shadow-2xl flex items-center gap-2 border border-slate-700 whitespace-nowrap"
                     >
-                      <span className="font-bold text-amber-400">{hl.label}</span>
+                      <span className="font-bold text-amber-400 font-['Jua']">{hl.label}</span>
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          setEditingHighlight({ id: hl.id, label: hl.label });
+                          setEditingHighlight(hl);
+                          setIsHighlightModalOpen(true);
                         }}
                         className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
-                        title="가이드 라벨 수정"
+                        title="가이드 색상/라벨 수정"
                       >
                         <Edit2 className="w-3 h-3" />
                       </button>
@@ -842,6 +924,169 @@ export const EditorView: React.FC = () => {
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedHighlightId(null);
+                        }}
+                        className="p-0.5 text-slate-500 hover:text-slate-300"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* 대화형 인터랙티브 글상자 (Text Box) 레이어 */}
+            {textBoxesList.map((tb) => {
+              let activeBox = tb.box;
+              if (dragState && dragState.type === 'textBox' && dragState.id === tb.id) {
+                activeBox = dragState.currentBox;
+              } else if (resizeState && resizeState.type === 'textBox' && resizeState.id === tb.id) {
+                activeBox = resizeState.currentBox;
+              }
+
+              const tx = activeBox.x <= 1 ? activeBox.x * activeSheet.naturalWidth : activeBox.x;
+              const ty = activeBox.y <= 1 ? activeBox.y * activeSheet.naturalHeight : activeBox.y;
+              const tw = activeBox.width <= 1 ? activeBox.width * activeSheet.naturalWidth : activeBox.width;
+              const th = activeBox.height <= 1 ? activeBox.height * activeSheet.naturalHeight : activeBox.height;
+
+              const isSelected = selectedTextBoxId === tb.id;
+
+              return (
+                <div
+                  key={tb.id}
+                  onMouseDown={(e) => handleItemDragStart(e, 'textBox', tb.id, { x: tx, y: ty, width: tw, height: th })}
+                  className={`absolute cursor-move select-none transition-shadow ${
+                    isSelected
+                      ? 'border-2 border-blue-500 ring-2 ring-blue-400/40 z-30 rounded-lg shadow-lg'
+                      : 'hover:border-2 hover:border-blue-400/60 z-10 rounded-lg'
+                  }`}
+                  style={{
+                    left: `${(tx / activeSheet.naturalWidth) * 100}%`,
+                    top: `${(ty / activeSheet.naturalHeight) * 100}%`,
+                    width: `${(tw / activeSheet.naturalWidth) * 100}%`,
+                    height: `${(th / activeSheet.naturalHeight) * 100}%`,
+                  }}
+                  title={`글상자: ${tb.text} (드래그 이동 / 핸들 크기조절 / Delete키 삭제)`}
+                >
+                  {isSelected && renderResizeHandles('textBox', tb.id, { x: tx, y: ty, width: tw, height: th })}
+
+                  {isSelected && (
+                    <div 
+                      onMouseDown={(e) => e.stopPropagation()}
+                      className="absolute -top-9 left-1 z-50 bg-slate-900 text-white rounded-lg px-2.5 py-1 text-xs shadow-2xl flex items-center gap-2 border border-slate-700 whitespace-nowrap"
+                    >
+                      <span className="font-bold text-blue-400 font-['Jua'] truncate max-w-[120px]">{tb.text}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingTextBox(tb);
+                          setIsTextBoxModalOpen(true);
+                        }}
+                        className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
+                        title="글상자 수정"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeTextBox(activeSheet.id, tb.id);
+                          setSelectedTextBoxId(null);
+                        }}
+                        className="p-1 hover:bg-red-500/20 rounded text-slate-400 hover:text-red-400"
+                        title="글상자 삭제 (Delete)"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTextBoxId(null);
+                        }}
+                        className="p-0.5 text-slate-500 hover:text-slate-300"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* 대화형 인터랙티브 악보 기호 아이콘 (Annotation Icons: |, ✓, (, )) 레이어 */}
+            {annotationsList.map((anno) => {
+              let activeBox = anno.box;
+              if (dragState && dragState.type === 'annotation' && dragState.id === anno.id) {
+                activeBox = dragState.currentBox;
+              } else if (resizeState && resizeState.type === 'annotation' && resizeState.id === anno.id) {
+                activeBox = resizeState.currentBox;
+              }
+
+              const ax = activeBox.x <= 1 ? activeBox.x * activeSheet.naturalWidth : activeBox.x;
+              const ay = activeBox.y <= 1 ? activeBox.y * activeSheet.naturalHeight : activeBox.y;
+              const aw = activeBox.width <= 1 ? activeBox.width * activeSheet.naturalWidth : activeBox.width;
+              const ah = activeBox.height <= 1 ? activeBox.height * activeSheet.naturalHeight : activeBox.height;
+
+              const isSelected = selectedAnnotationId === anno.id;
+              const symbolLabel = anno.iconType === 'bar' ? '|' : anno.iconType === 'check' ? '✓' : anno.iconType === 'paren_open' ? '(' : ')';
+
+              return (
+                <div
+                  key={anno.id}
+                  onMouseDown={(e) => handleItemDragStart(e, 'annotation', anno.id, { x: ax, y: ay, width: aw, height: ah })}
+                  className={`absolute cursor-move select-none transition-shadow ${
+                    isSelected
+                      ? 'border-2 border-indigo-500 ring-2 ring-indigo-400/40 z-30 rounded shadow-lg'
+                      : 'hover:border-2 hover:border-indigo-400/60 z-10 rounded'
+                  }`}
+                  style={{
+                    left: `${(ax / activeSheet.naturalWidth) * 100}%`,
+                    top: `${(ay / activeSheet.naturalHeight) * 100}%`,
+                    width: `${(aw / activeSheet.naturalWidth) * 100}%`,
+                    height: `${(ah / activeSheet.naturalHeight) * 100}%`,
+                  }}
+                  title={`기호: ${symbolLabel} (드래그 이동 / 핸들 크기조절 / Delete키 삭제)`}
+                >
+                  {isSelected && renderResizeHandles('annotation', anno.id, { x: ax, y: ay, width: aw, height: ah })}
+
+                  {isSelected && (
+                    <div 
+                      onMouseDown={(e) => e.stopPropagation()}
+                      className="absolute -top-9 left-1 z-50 bg-slate-900 text-white rounded-lg px-2.5 py-1 text-xs shadow-2xl flex items-center gap-2 border border-slate-700 whitespace-nowrap"
+                    >
+                      <span className="font-bold text-indigo-400 font-['Jua'] text-sm">{symbolLabel}</span>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setEditingAnnotation(anno);
+                          setIsAnnotationModalOpen(true);
+                        }}
+                        className="p-1 hover:bg-slate-800 rounded text-slate-300 hover:text-white"
+                        title="기호 수정"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeAnnotation(activeSheet.id, anno.id);
+                          setSelectedAnnotationId(null);
+                        }}
+                        className="p-1 hover:bg-red-500/20 rounded text-slate-400 hover:text-red-400"
+                        title="기호 삭제 (Delete)"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedAnnotationId(null);
                         }}
                         className="p-0.5 text-slate-500 hover:text-slate-300"
                       >
@@ -882,9 +1127,9 @@ export const EditorView: React.FC = () => {
                 <div
                   onMouseDown={(e) => e.stopPropagation()}
                   onClick={(e) => e.stopPropagation()}
-                  className="absolute z-30 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5 select-none"
+                  className="absolute z-30 bg-white dark:bg-zinc-900 border border-slate-300 dark:border-slate-700 rounded-xl p-1.5 shadow-2xl flex items-center gap-1.5 select-none"
                   style={{
-                    left: `${Math.max(2, Math.min(80, (selectionBox.x / activeSheet.naturalWidth) * 100))}%`,
+                    left: `${Math.max(2, Math.min(75, (selectionBox.x / activeSheet.naturalWidth) * 100))}%`,
                     top: `${Math.max(5, (selectionBox.y / activeSheet.naturalHeight) * 100)}%`,
                     transform: 'translateY(-115%)',
                   }}
@@ -896,22 +1141,36 @@ export const EditorView: React.FC = () => {
                       e.stopPropagation();
                       setIsChordModalOpen(true);
                     }}
-                    className="px-2.5 py-1 text-xs rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-colors shadow-sm flex items-center gap-1"
+                    className="px-2.5 py-1 text-xs rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold transition-colors shadow-sm flex items-center gap-1 font-['Jua']"
                   >
                     <Hash className="w-3.5 h-3.5" />
-                    <span>이 영역에 코드 지정</span>
+                    <span>코드 지정</span>
                   </button>
                   <button
                     type="button"
                     onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation();
+                      setEditingHighlight(null);
                       setIsHighlightModalOpen(true);
                     }}
-                    className="px-2.5 py-1 text-xs rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition-colors shadow-sm flex items-center gap-1"
+                    className="px-2.5 py-1 text-xs rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold transition-colors shadow-sm flex items-center gap-1 font-['Jua']"
                   >
                     <Bookmark className="w-3.5 h-3.5" />
-                    <span>세션 가이드 지정</span>
+                    <span>가이드 지정</span>
+                  </button>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingTextBox(null);
+                      setIsTextBoxModalOpen(true);
+                    }}
+                    className="px-2.5 py-1 text-xs rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold transition-colors shadow-sm flex items-center gap-1 font-['Jua']"
+                  >
+                    <Type className="w-3.5 h-3.5" />
+                    <span>글상자 지정</span>
                   </button>
                   <button
                     type="button"
@@ -933,7 +1192,7 @@ export const EditorView: React.FC = () => {
         </div>
 
         {/* 플로팅 줌 컨트롤 바 */}
-        <div className="absolute bottom-5 left-5 z-20 flex items-center gap-1.5 p-1.5 bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl backdrop-blur-md">
+        <div className="absolute bottom-5 left-5 z-20 flex items-center gap-1.5 p-1.5 bg-white/90 dark:bg-zinc-900/90 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-xl backdrop-blur-md">
           <button
             onClick={() => setZoom((z) => Math.max(0.5, z - 0.15))}
             className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
@@ -941,7 +1200,7 @@ export const EditorView: React.FC = () => {
           >
             <ZoomOut className="w-4 h-4" />
           </button>
-          <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 px-1">
+          <span className="text-xs font-mono font-bold text-slate-700 dark:text-slate-300 px-1 font-['Jua']">
             {Math.round(zoom * 100)}%
           </span>
           <button
@@ -953,17 +1212,17 @@ export const EditorView: React.FC = () => {
           </button>
           <button
             onClick={() => setZoom(1)}
-            className="px-2 py-1 text-[11px] rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+            className="px-2 py-1 text-[11px] rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 font-['Jua']"
           >
             100%
           </button>
         </div>
 
-        {/* 3. 우측 "코드 & 세션 가이드 목록 관리 패널" */}
+        {/* 3. 우측 "악보 요소 목록 관리 패널" (코드, 가이드, 글상자, 아이콘 4개 탭) */}
         {isSidePanelOpen && (
           <aside className="w-80 h-full bg-white dark:bg-zinc-900 border-l border-slate-200 dark:border-zinc-800 flex flex-col z-20 shadow-2xl animate-in slide-in-from-right duration-150">
             <div className="p-4 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-zinc-100">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-zinc-100 font-['Jua']">
                 악보 요소 관리
               </h3>
               <button
@@ -974,33 +1233,53 @@ export const EditorView: React.FC = () => {
               </button>
             </div>
 
-            {/* 탭 전환 */}
-            <div className="flex border-b border-slate-200 dark:border-slate-800 p-1 bg-slate-50 dark:bg-slate-950/40">
+            {/* 4종 탭 전환 버튼 */}
+            <div className="grid grid-cols-4 border-b border-slate-200 dark:border-zinc-800 p-1 bg-slate-50 dark:bg-zinc-950/40 text-center">
               <button
                 onClick={() => setActiveTab('chords')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                className={`py-1.5 text-xs font-bold rounded-lg transition-colors font-['Jua'] ${
                   activeTab === 'chords'
                     ? 'bg-emerald-500 text-slate-950 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
                 }`}
               >
-                코드 ({activeSheet.chords.length})
+                코드({activeSheet.chords.length})
               </button>
               <button
                 onClick={() => setActiveTab('highlights')}
-                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-colors ${
+                className={`py-1.5 text-xs font-bold rounded-lg transition-colors font-['Jua'] ${
                   activeTab === 'highlights'
                     ? 'bg-amber-500 text-slate-950 shadow-sm'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
                 }`}
               >
-                가이드 ({activeSheet.sessionHighlights.length})
+                가이드({activeSheet.sessionHighlights.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('textBoxes')}
+                className={`py-1.5 text-xs font-bold rounded-lg transition-colors font-['Jua'] ${
+                  activeTab === 'textBoxes'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+                }`}
+              >
+                글상자({textBoxesList.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('annotations')}
+                className={`py-1.5 text-xs font-bold rounded-lg transition-colors font-['Jua'] ${
+                  activeTab === 'annotations'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800'
+                }`}
+              >
+                기호({annotationsList.length})
               </button>
             </div>
 
             {/* 탭 내용 리스트 */}
             <div className="flex-1 overflow-y-auto p-3 space-y-2">
-              {activeTab === 'chords' ? (
+              {activeTab === 'chords' && (
                 activeSheet.chords.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-8">등록된 코드가 없습니다.</p>
                 ) : (
@@ -1061,7 +1340,9 @@ export const EditorView: React.FC = () => {
                     );
                   })
                 )
-              ) : (
+              )}
+
+              {activeTab === 'highlights' && (
                 activeSheet.sessionHighlights.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-8">등록된 세션 가이드가 없습니다.</p>
                 ) : (
@@ -1077,10 +1358,10 @@ export const EditorView: React.FC = () => {
                     >
                       <div className="flex items-center gap-2">
                         <span 
-                          className="w-3 h-3 rounded-full flex-shrink-0" 
-                          style={{ backgroundColor: hl.color || '#f59e0b' }} 
+                          className="w-3.5 h-3.5 rounded-full flex-shrink-0 border border-black/10" 
+                          style={{ backgroundColor: hl.borderColor || hl.color || '#f59e0b' }} 
                         />
-                        <span className="font-bold text-slate-900 dark:text-white">
+                        <span className="font-bold text-slate-900 dark:text-white font-['Jua']">
                           {hl.label}
                         </span>
                       </div>
@@ -1090,7 +1371,8 @@ export const EditorView: React.FC = () => {
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEditingHighlight({ id: hl.id, label: hl.label });
+                            setEditingHighlight(hl);
+                            setIsHighlightModalOpen(true);
                           }}
                           className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded"
                           title="가이드 수정"
@@ -1113,32 +1395,141 @@ export const EditorView: React.FC = () => {
                   ))
                 )
               )}
+
+              {activeTab === 'textBoxes' && (
+                textBoxesList.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-8">등록된 글상자가 없습니다.</p>
+                ) : (
+                  textBoxesList.map((tb) => (
+                    <div
+                      key={tb.id}
+                      onClick={() => setSelectedTextBoxId(tb.id)}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors cursor-pointer ${
+                        selectedTextBoxId === tb.id
+                          ? 'bg-blue-50 dark:bg-blue-950/40 border-blue-500'
+                          : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Type className="w-3.5 h-3.5 flex-shrink-0" style={{ color: tb.color || '#2563eb' }} />
+                        <span className="font-bold text-slate-900 dark:text-white font-['Jua'] truncate">
+                          {tb.text}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingTextBox(tb);
+                            setIsTextBoxModalOpen(true);
+                          }}
+                          className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded"
+                          title="글상자 수정"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeTextBox(activeSheet.id, tb.id);
+                          }}
+                          className="p-1 text-slate-400 hover:text-red-500 rounded"
+                          title="글상자 삭제"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
+
+              {activeTab === 'annotations' && (
+                annotationsList.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-8">등록된 기호 아이콘이 없습니다.</p>
+                ) : (
+                  annotationsList.map((anno) => {
+                    const symbolLabel = anno.iconType === 'bar' ? '|' : anno.iconType === 'check' ? '✓' : anno.iconType === 'paren_open' ? '(' : ')';
+                    const typeKorean = anno.iconType === 'bar' ? '세로 막대' : anno.iconType === 'check' ? '체크 표시' : anno.iconType === 'paren_open' ? '여는 괄호' : '닫는 괄호';
+
+                    return (
+                      <div
+                        key={anno.id}
+                        onClick={() => setSelectedAnnotationId(anno.id)}
+                        className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition-colors cursor-pointer ${
+                          selectedAnnotationId === anno.id
+                            ? 'bg-indigo-50 dark:bg-indigo-950/40 border-indigo-500'
+                            : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60 hover:border-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center font-bold font-['Jua'] text-sm" style={{ color: anno.color || '#2563eb' }}>
+                            {symbolLabel}
+                          </span>
+                          <span className="font-bold text-slate-900 dark:text-white font-['Jua']">
+                            {typeKorean} ({symbolLabel})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingAnnotation(anno);
+                              setIsAnnotationModalOpen(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded"
+                            title="기호 수정"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeAnnotation(activeSheet.id, anno.id);
+                            }}
+                            className="p-1 text-slate-400 hover:text-red-500 rounded"
+                            title="기호 삭제"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                )
+              )}
             </div>
 
-            <div className="p-3 border-t border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 text-center">
-              💡 악보 위에서 요소를 마우스로 직접 끌어서 위치를 이동시킬 수도 있습니다.
+            <div className="p-3 border-t border-slate-200 dark:border-zinc-800 text-[11px] text-slate-500 text-center font-['Jua']">
+              💡 악보 위에서 요소를 마우스로 직접 끌어서 위치를 이동시키거나 크기를 조절할 수 있습니다.
             </div>
           </aside>
         )}
       </div>
 
-      {/* 인라인 코드 수정 모달 */}
+      {/* 인라인 코드 텍스트 빠른 수정 모달 */}
       {editingChord && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xl">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">코드 텍스트 수정</h3>
+          <div className="w-full max-w-xs bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl p-5 shadow-2xl">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3 font-['Jua']">코드 텍스트 수정</h3>
             <input
               type="text"
               value={editingChord.text}
               onChange={(e) => setEditingChord({ ...editingChord, text: e.target.value })}
               autoFocus
-              className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-bold mb-4 focus:outline-none focus:border-emerald-500"
+              className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-bold mb-4 focus:outline-none focus:border-emerald-500 font-mono"
             />
             <div className="flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setEditingChord(null)}
-                className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700"
+                className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700 font-['Jua']"
               >
                 취소
               </button>
@@ -1150,7 +1541,7 @@ export const EditorView: React.FC = () => {
                   }
                   setEditingChord(null);
                 }}
-                className="px-4 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg shadow"
+                className="px-4 py-1.5 text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-lg shadow font-['Jua']"
               >
                 저장 완료
               </button>
@@ -1159,44 +1550,7 @@ export const EditorView: React.FC = () => {
         </div>
       )}
 
-      {/* 인라인 가이드 수정 모달 */}
-      {editingHighlight && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-xs bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 shadow-2xl">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white mb-3">세션 가이드 라벨 수정</h3>
-            <input
-              type="text"
-              value={editingHighlight.label}
-              onChange={(e) => setEditingHighlight({ ...editingHighlight, label: e.target.value })}
-              autoFocus
-              className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-white font-bold mb-4 focus:outline-none focus:border-amber-500"
-            />
-            <div className="flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setEditingHighlight(null)}
-                className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-700"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (editingHighlight.label.trim()) {
-                    updateHighlight(activeSheet.id, editingHighlight.id, editingHighlight.label.trim());
-                  }
-                  setEditingHighlight(null);
-                }}
-                className="px-4 py-1.5 text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg shadow"
-              >
-                저장 완료
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 신규 등록 모달들 */}
+      {/* 4종 등록 / 수정 모달들 */}
       <AddChordModal
         isOpen={isChordModalOpen}
         onClose={() => {
@@ -1217,14 +1571,100 @@ export const EditorView: React.FC = () => {
         onClose={() => {
           setIsHighlightModalOpen(false);
           setSelectionBox(null);
+          setEditingHighlight(null);
         }}
+        initialHighlight={editingHighlight}
         initialBox={selectionBox || { 
           x: Math.round(activeSheet.naturalWidth * 0.1), 
           y: Math.round(activeSheet.naturalHeight * 0.3), 
           width: Math.round(activeSheet.naturalWidth * 0.8), 
           height: 90 
         }}
-        onAddHighlight={(hl) => addHighlight(activeSheet.id, hl)}
+        onSave={(data) => {
+          if (editingHighlight) {
+            updateHighlight(activeSheet.id, editingHighlight.id, data.label, data.borderColor, data.backgroundColor);
+          } else {
+            addHighlight(activeSheet.id, {
+              label: data.label,
+              box: data.box || { 
+                x: Math.round(activeSheet.naturalWidth * 0.1), 
+                y: Math.round(activeSheet.naturalHeight * 0.3), 
+                width: Math.round(activeSheet.naturalWidth * 0.8), 
+                height: 90 
+              },
+              borderColor: data.borderColor,
+              backgroundColor: data.backgroundColor,
+              textColor: data.textColor,
+            });
+          }
+        }}
+      />
+
+      <AddTextBoxModal
+        isOpen={isTextBoxModalOpen}
+        onClose={() => {
+          setIsTextBoxModalOpen(false);
+          setSelectionBox(null);
+          setEditingTextBox(null);
+        }}
+        initialTextBox={editingTextBox}
+        initialBox={selectionBox || {
+          x: Math.round(activeSheet.naturalWidth * 0.1),
+          y: Math.round(activeSheet.naturalHeight * 0.15),
+          width: Math.round(activeSheet.naturalWidth * 0.3),
+          height: 48,
+        }}
+        onSave={(data) => {
+          if (editingTextBox) {
+            updateTextBox(activeSheet.id, editingTextBox.id, {
+              text: data.text,
+              color: data.color,
+              fontSize: data.fontSize,
+            });
+          } else {
+            addTextBox(activeSheet.id, {
+              text: data.text,
+              color: data.color,
+              fontSize: data.fontSize,
+              box: data.box || {
+                x: Math.round(activeSheet.naturalWidth * 0.1),
+                y: Math.round(activeSheet.naturalHeight * 0.15),
+                width: Math.round(activeSheet.naturalWidth * 0.3),
+                height: 48,
+              },
+            });
+          }
+        }}
+      />
+
+      <AddAnnotationModal
+        isOpen={isAnnotationModalOpen}
+        onClose={() => {
+          setIsAnnotationModalOpen(false);
+          setSelectionBox(null);
+          setEditingAnnotation(null);
+        }}
+        initialAnnotation={editingAnnotation}
+        initialBox={selectionBox || undefined}
+        onSave={(data) => {
+          if (editingAnnotation) {
+            updateAnnotation(activeSheet.id, editingAnnotation.id, {
+              iconType: data.iconType,
+              color: data.color,
+            });
+          } else {
+            addAnnotation(activeSheet.id, {
+              iconType: data.iconType,
+              color: data.color,
+              box: data.box || {
+                x: Math.round(activeSheet.naturalWidth * 0.1),
+                y: Math.round(activeSheet.naturalHeight * 0.25),
+                width: 32,
+                height: 48,
+              },
+            });
+          }
+        }}
       />
     </main>
   );

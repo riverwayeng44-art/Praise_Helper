@@ -155,7 +155,7 @@ export const SlideShowModal: React.FC = () => {
                 {slideIndex + 1}
               </div>
               <div>
-                <h2 className="text-sm font-bold text-white tracking-wide">
+                <h2 className="text-sm font-bold text-white tracking-wide font-['Jua']">
                   {currentSheet.title}
                 </h2>
                 <div className="flex items-center gap-2 text-xs">
