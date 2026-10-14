@@ -446,6 +446,8 @@ export const EditorView: React.FC = () => {
     );
   };
 
+  const activeSheetIndex = sheets.findIndex((s) => s.id === activeSheetId);
+
   return (
     <main className="flex-1 h-full bg-slate-100 dark:bg-slate-950 flex flex-col min-w-0 select-none overflow-hidden transition-colors duration-200 relative">
       {/* 실시간 알림 토스트 팝업 */}
@@ -462,11 +464,14 @@ export const EditorView: React.FC = () => {
       )}
 
       {/* 1. 상단 메인 툴바 */}
-      <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 p-3.5 space-y-2.5 transition-colors duration-200 shadow-sm z-20">
+      <div className="bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 p-3.5 space-y-2.5 transition-colors duration-200 shadow-sm z-20">
         {/* 상단 1행 */}
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <h2 className="text-base font-bold text-slate-900 dark:text-white truncate">
+            <span className="px-2 py-0.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs shadow-sm">
+              {activeSheetIndex !== -1 ? `${activeSheetIndex + 1}번곡` : '악보'}
+            </span>
+            <h2 className="text-base font-bold text-slate-900 dark:text-zinc-100 truncate">
               {activeSheet.title}
             </h2>
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono">
@@ -506,10 +511,10 @@ export const EditorView: React.FC = () => {
                   ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-400'
                   : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 hover:border-emerald-500'
               }`}
-              title="악보의 모든 코드를 정밀 분석하여 원터치 키 체인지를 활성화합니다"
+              title={`${activeSheet.title}의 모든 코드를 정밀 분석하여 원터치 키 체인지를 활성화합니다`}
             >
               <Sparkles className={`w-3.5 h-3.5 ${activeSheet.isAnalyzing ? 'animate-spin' : ''}`} />
-              <span>{activeSheet.isAnalyzing ? '분석 중...' : 'AI 코드 전수 분석'}</span>
+              <span>{activeSheet.isAnalyzing ? '분석 중...' : `AI 코드 전수 분석 (${activeSheetIndex + 1}번곡)`}</span>
             </button>
 
             {/* AI 자동 가이드 생성 버튼 (신규 분리 기능) */}
@@ -657,11 +662,11 @@ export const EditorView: React.FC = () => {
               setSelectedHighlightId(null);
             }
           }}
-          className="flex-1 overflow-auto bg-slate-200 dark:bg-slate-950 p-6 flex flex-col items-center justify-start transition-colors duration-200"
+          className="flex-1 overflow-auto bg-slate-100 dark:bg-zinc-950 p-6 flex flex-col items-center justify-start transition-colors duration-200"
         >
           {/* 악보 이미지 및 대화형 오버레이 레이어 */}
           <div 
-            className="relative shadow-2xl rounded-lg border border-slate-300 dark:border-slate-800 bg-white transition-transform duration-100 origin-top mb-12"
+            className="relative shadow-2xl rounded-lg border border-slate-300 dark:border-zinc-800 bg-white transition-transform duration-100 origin-top mb-12"
             style={{ 
               transform: `scale(${zoom})`,
               width: 'fit-content',
@@ -956,9 +961,9 @@ export const EditorView: React.FC = () => {
 
         {/* 3. 우측 "코드 & 세션 가이드 목록 관리 패널" */}
         {isSidePanelOpen && (
-          <aside className="w-80 h-full bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col z-20 shadow-2xl animate-in slide-in-from-right duration-150">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
-              <h3 className="font-bold text-sm text-slate-900 dark:text-slate-100">
+          <aside className="w-80 h-full bg-white dark:bg-zinc-900 border-l border-slate-200 dark:border-zinc-800 flex flex-col z-20 shadow-2xl animate-in slide-in-from-right duration-150">
+            <div className="p-4 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+              <h3 className="font-bold text-sm text-slate-900 dark:text-zinc-100">
                 악보 요소 관리
               </h3>
               <button

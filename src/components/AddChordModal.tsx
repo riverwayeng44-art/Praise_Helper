@@ -35,8 +35,8 @@ export const AddChordModal: React.FC<AddChordModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-sm bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl overflow-hidden select-none transition-colors duration-200">
-        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <div className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-xl overflow-hidden select-none transition-colors duration-200">
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Hash className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100">코드 수동 추가</h3>

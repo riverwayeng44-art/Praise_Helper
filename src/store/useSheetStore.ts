@@ -81,6 +81,7 @@ async function getOrLoadImage(url: string): Promise<HTMLImageElement> {
 }
 
 function applyThemeToDOM(theme: 'dark' | 'light') {
+  if (typeof document === 'undefined') return;
   if (theme === 'dark') {
     document.documentElement.classList.add('dark');
     document.documentElement.classList.remove('light');
@@ -94,13 +95,19 @@ function applyThemeToDOM(theme: 'dark' | 'light') {
   }
 }
 
+const initialTheme: 'dark' | 'light' = 
+  (typeof window !== 'undefined' && (localStorage.getItem('praise_helper_theme') as 'dark' | 'light')) || 'light';
+if (typeof document !== 'undefined') {
+  applyThemeToDOM(initialTheme);
+}
+
 export const useSheetStore = create<SheetStoreState>((set, get) => ({
   sheets: [],
   activeSheetId: null,
   showHighlights: true,
   isSlideMode: false,
   slideIndex: 0,
-  theme: 'dark',
+  theme: initialTheme,
   apiConfig: DEFAULT_API_CONFIG,
   toastMessage: null,
 
@@ -113,12 +120,13 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     try {
       const saved = await loadAppState();
       if (saved && saved.sheets && saved.sheets.length > 0) {
-        applyThemeToDOM(saved.theme || 'dark');
+        const targetTheme = saved.theme || initialTheme;
+        applyThemeToDOM(targetTheme);
         set({
           sheets: saved.sheets,
           activeSheetId: saved.sheets[0]?.id || null,
           showHighlights: saved.showHighlights ?? true,
-          theme: saved.theme || 'dark',
+          theme: targetTheme,
           apiConfig: saved.apiConfig || DEFAULT_API_CONFIG,
           lastSavedAt: saved.lastSavedAt || Date.now(),
           isDirty: false,
@@ -177,8 +185,10 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
 
   setTheme: (theme: 'dark' | 'light') => {
     applyThemeToDOM(theme);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('praise_helper_theme', theme);
+    }
     set({ theme, isDirty: true });
-    // 테마 변경 즉시 저장
     get().saveToStorage();
   },
 
@@ -280,33 +290,35 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     }
 
     const sampleChords = [
-      { text: 'G', x: 130, y: 250 },
-      { text: 'D/F#', x: 380, y: 250 },
-      { text: 'Em7', x: 630, y: 250 },
-      { text: 'Bm7', x: 880, y: 250 },
-      { text: 'C', x: 130, y: 530 },
-      { text: 'G/B', x: 380, y: 530 },
-      { text: 'Am7', x: 630, y: 530 },
-      { text: 'D7', x: 880, y: 530 },
-      { text: 'Em', x: 130, y: 810 },
-      { text: 'Cadd9', x: 380, y: 810 },
-      { text: 'G', x: 630, y: 810 },
-      { text: 'D', x: 880, y: 810 },
-      { text: 'C', x: 130, y: 1090 },
-      { text: 'D', x: 380, y: 1090 },
-      { text: 'G', x: 630, y: 1090 },
-      { text: 'G', x: 880, y: 1090 },
+      { text: 'G', x: 220, y: 250 },
+      { text: 'D/F#', x: 470, y: 250 },
+      { text: 'Em7', x: 720, y: 250 },
+      { text: 'Bm7', x: 970, y: 250 },
+      { text: 'C', x: 220, y: 530 },
+      { text: 'G/B', x: 470, y: 530 },
+      { text: 'Am7', x: 720, y: 530 },
+      { text: 'D7', x: 970, y: 530 },
+      { text: 'Em', x: 220, y: 810 },
+      { text: 'Cadd9', x: 470, y: 810 },
+      { text: 'G', x: 720, y: 810 },
+      { text: 'D', x: 970, y: 810 },
+      { text: 'C', x: 220, y: 1090 },
+      { text: 'D', x: 470, y: 1090 },
+      { text: 'G', x: 720, y: 1090 },
+      { text: 'G', x: 970, y: 1090 },
     ];
 
-    ctx.font = 'bold 30px sans-serif';
+    ctx.font = 'bold 28px sans-serif';
     ctx.fillStyle = '#0f172a';
-    ctx.textAlign = 'left';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
     for (const c of sampleChords) {
       ctx.fillText(c.text, c.x, c.y);
     }
 
     ctx.font = '22px sans-serif';
     ctx.fillStyle = '#334155';
+    ctx.textAlign = 'left';
     ctx.fillText('이 곳에 생명 샘 솟아나', 140, 395);
     ctx.fillText('눈물 골짝 지나갈 때에', 390, 395);
     ctx.fillText('머잖아 열매 맺히고', 640, 395);
@@ -321,34 +333,43 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     const img = await getOrLoadImage(dataUrl);
 
     const id = `sheet-sample-${Date.now()}`;
-    const chords: ChordItem[] = sampleChords.map((c, i) => ({
-      id: `sample-chord-${i}`,
-      chordText: c.text,
-      box: {
-        x: c.x - 10,
-        y: c.y - 32,
-        width: 100,
-        height: 42,
-      },
-    }));
+    const chords: ChordItem[] = sampleChords.map((c, i) => {
+      const boxW = c.text.includes('/') || c.text.length > 3 ? 90 : 65;
+      return {
+        id: `sample-chord-${i}`,
+        chordText: c.text,
+        box: {
+          x: c.x - boxW / 2,
+          y: c.y - 18,
+          width: boxW,
+          height: 36,
+        },
+      };
+    });
 
     const sessionHighlights: HighlightArea[] = [
       {
         id: 'sample-hl-1',
-        label: '🥁 드럼 in (소프트 림샷)',
-        box: { x: 100, y: 470, width: 1000, height: 160 },
+        label: '🥁 드럼 in (Acoustic & Soft Rimshot)',
+        box: { x: 100, y: 505, width: 1000, height: 185 },
         color: '#f59e0b',
       },
       {
         id: 'sample-hl-2',
-        label: '📈 빌드업 (베이스 & 패드 참여)',
-        box: { x: 100, y: 750, width: 1000, height: 160 },
+        label: '📈 빌드업 (베이스 & 패드 참여, 점진적 고조)',
+        box: { x: 100, y: 785, width: 1000, height: 185 },
         color: '#8b5cf6',
       },
       {
         id: 'sample-hl-3',
-        label: '⚡ 브레이크 (피아노 솔로)',
-        box: { x: 600, y: 1030, width: 500, height: 160 },
+        label: '🔥 풀 세션 (Full Band 코러스)',
+        box: { x: 100, y: 1065, width: 500, height: 185 },
+        color: '#10b981',
+      },
+      {
+        id: 'sample-hl-4',
+        label: '⚡ 브레이크 (피아노 솔로 & 잔잔하게)',
+        box: { x: 600, y: 1065, width: 500, height: 185 },
         color: '#ef4444',
       },
     ];

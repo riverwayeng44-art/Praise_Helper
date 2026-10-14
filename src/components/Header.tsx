@@ -32,7 +32,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
   } = useSheetStore();
 
   return (
-    <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-5 flex items-center justify-between select-none shadow-sm transition-colors duration-200">
+    <header className="h-16 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 px-5 flex items-center justify-between select-none shadow-sm transition-colors duration-200">
       {/* 로고 및 프로그램 타이틀 */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white">

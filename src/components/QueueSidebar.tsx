@@ -46,9 +46,9 @@ export const QueueSidebar: React.FC = () => {
   };
 
   return (
-    <aside className="w-80 h-full bg-white dark:bg-slate-900/90 border-r border-slate-200 dark:border-slate-800 flex flex-col flex-shrink-0 select-none transition-colors duration-200">
+    <aside className="w-80 h-full bg-white dark:bg-zinc-900 border-r border-slate-200 dark:border-zinc-800 flex flex-col flex-shrink-0 select-none transition-colors duration-200">
       {/* 큐 상단 타이틀 */}
-      <div className="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+      <div className="p-4 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Music2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
           <h2 className="font-bold text-slate-900 dark:text-slate-100 text-sm">찬양 콘티 큐 (순서)</h2>

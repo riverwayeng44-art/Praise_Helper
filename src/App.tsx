@@ -50,7 +50,7 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans select-none transition-colors duration-200">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 font-sans select-none transition-colors duration-200">
       {/* 1. 상단 글로벌 네비게이션 헤더 */}
       <Header onOpenSettings={() => setIsSettingsOpen(true)} />
 

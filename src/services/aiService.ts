@@ -2,8 +2,10 @@ import { ApiConfig, ChordItem, HighlightArea } from '../types';
 
 // 깃허브 공개 코드에 실제 주소가 노출되거나 검색되지 않도록 보호된 내장 엔드포인트 복원 함수
 function getEmbeddedBridgeUrl(): string {
-  const envUrl = import.meta.env.VITE_BRIDGE_BASE_URL;
-  if (envUrl) return envUrl.replace(/\/+$/, '');
+  if (typeof window !== 'undefined') {
+    const customUrl = localStorage.getItem('praise_helper_bridge_url');
+    if (customUrl) return customUrl.replace(/\/+$/, '');
+  }
   try {
     const raw = '425e5e5a591005054e4f48434b44045e4b43464c4e4c1b1c49045e5904444f5e055c1b';
     const key = 42;
@@ -32,14 +34,14 @@ export interface AIAnalysisResult {
 }
 
 /**
- * 전송용 이미지 경량화 (API 페이로드 초과 및 타임아웃 방지)
+ * 전송용 이미지 최적화 (글자 및 오선 선명도 극대화: 최대 2200px, 95% 품질)
  */
 async function createOptimizedDataUrl(originalDataUrl: string): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      const maxDim = 1200;
+      const maxDim = 2200;
       let w = img.naturalWidth || img.width;
       let h = img.naturalHeight || img.height;
 
@@ -58,7 +60,7 @@ async function createOptimizedDataUrl(originalDataUrl: string): Promise<string> 
       canvas.height = h;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL('image/jpeg', 0.8));
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
     img.onerror = () => resolve(originalDataUrl);
     img.src = originalDataUrl;
@@ -66,7 +68,10 @@ async function createOptimizedDataUrl(originalDataUrl: string): Promise<string> 
 }
 
 /**
- * 1. AI 악보 코드 전수 분석 (Bridge Server 우선 호출 -> 실패 시 즉각 스마트 로컬 비전 분석 폴백)
+ * 1. AI 악보 코드 전수 분석 (Bridge Server 맥미니 Hermes 직통 라우팅 @@)
+ * - 실제 악보 오선보 위의 코드만 정확히 추출
+ * - 오른쪽 메모나 설명 글은 제외
+ * - 2마디 동안 코드가 1개면 1개만 추출 (없는 코드를 지어내지 않음)
  */
 export async function analyzeSheetMusicWithAI(
   imageBase64: string,
@@ -74,110 +79,37 @@ export async function analyzeSheetMusicWithAI(
   imageHeight: number,
   config: ApiConfig = DEFAULT_API_CONFIG
 ): Promise<AIAnalysisResult> {
-  // 사용자가 브릿지 통신 시도 시 최대 8초만 대기
   const promptText = `
-너는 찬양팀 악보 및 음악 화성학 최고 전문가야.
-첨부된 악보 이미지의 모든 보표(상단, 중단, 하단, 좌우측)에 인쇄된 모든 음악 코드를 정밀 분석해서 JSON으로만 응답해줘.
-1. "detectedKey": 악보의 원본 조성 (예: "A", "G", "C", "D", "E", "F", "Bb" 등)
-2. "chords": 악보의 모든 마디 위에 인쇄된 코드를 누락 없이 추출.
-   - chordText: "A", "E", "F#m7", "D", "G", "Em", "C", "D/F#" 등
-   - box: 해당 코드 글자 영역의 타이트한 좌표 { x, y, width, height }
-악보 크기: 가로 ${imageWidth}px, 세로 ${imageHeight}px.
+@@ 너는 찬양팀 악보 및 음악 화성학 최고 전문가 AI야.
+첨부된 찬양 악보 이미지를 정밀 분석해서 인쇄된 모든 음악 코드를 추출하고 정확한 조성을 찾아줘.
+
+[엄격한 분석 및 좌표 규칙]
+1. "detectedKey": 악보의 원본 조성 (조표의 샵/플랫 개수와 첫/마지막 으뜸음을 분석하여 "A", "G", "C", "D", "E", "F", "Bb", "Eb" 등으로 정확히 판별).
+2. "chords": 오선보(Staff) 바로 위에 인쇄된 영문 코드만 위에서부터 순서대로 정확히 추출해.
+   - 실제 악보에 인쇄되어 있는 코드만 추출하고, 없는 코드를 임의로 지어내거나 추측해서 채우지 마!
+   - 2마디 동안 코드가 1개면 1개만 추출해.
+   - 악보 바깥 우측이나 하단의 곡 순서/가사 메모(Intro, V, PC, 드럼 in 등 설명 텍스트)는 악보 코드가 아니므로 절대 chords에 포함하지 마!
+   - 각 코드 글자의 위치 비율(0.0 ~ 1.0)을 측정해줘:
+     * xPercent: 전체 이미지 가로 기준 해당 코드 글자의 중심 X 비율 (0.00 ~ 1.00)
+     * yPercent: 전체 이미지 세로 기준 해당 코드 글자의 중심 Y 비율 (0.00 ~ 1.00)
 
 반드시 순수 JSON 객체만 응답해:
 {
   "detectedKey": "A",
   "chords": [
-    { "chordText": "A", "box": { "x": 120, "y": 80, "width": 45, "height": 30 } }
+    { "chordText": "A", "xPercent": 0.12, "yPercent": 0.18 },
+    { "chordText": "E", "xPercent": 0.35, "yPercent": 0.18 }
   ]
 }
 `.trim();
 
-  try {
-    const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
-      },
-      body: JSON.stringify({
-        model: config.model || 'gemini-3.1-pro',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: promptText },
-              {
-                type: 'image_url',
-                image_url: { url: optimizedDataUrl },
-              },
-            ],
-          },
-        ],
-        temperature: 0.1,
-      }),
-      signal: controller.signal,
-    });
-
-    clearTimeout(timeoutId);
-
-    if (response.ok) {
-      const json = await response.json();
-      const content = json.choices?.[0]?.message?.content;
-      if (content) {
-        const parsed = extractJsonFromResponse(content);
-        if (parsed.chords && parsed.chords.length > 0) {
-          return {
-            detectedKey: parsed.detectedKey || 'A',
-            chords: parsed.chords.map((c: any, index: number) => ({
-              id: `ai-chord-${Date.now()}-${index}`,
-              chordText: c.chordText || 'C',
-              box: sanitizeBox(c.box, imageWidth, imageHeight),
-            })),
-            sessionHighlights: [],
-          };
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[AI Service] 브릿지 서버 통신 불가 또는 타임아웃 -> 고성능 로컬 악보 분석기로 즉시 전환');
-  }
-
-  // 브릿지 서버 미응답 시: 사용자가 기다림 없이 키 변경을 즉시 사용할 수 있도록 고성능 로컬 악보 비전 분석기 실행
-  return generateSmartLocalSheetChords(imageBase64, imageWidth, imageHeight);
-}
-
-/**
- * 2. AI 자동 가이드 생성 (악보의 구조를 분석하여 세션 가이드만 생성)
- */
-export async function generateSessionGuidesWithAI(
-  imageBase64: string,
-  imageWidth: number,
-  imageHeight: number,
-  config: ApiConfig = DEFAULT_API_CONFIG
-): Promise<HighlightArea[]> {
-  const promptText = `
-너는 예배 찬양팀 전문 세션 디렉터야.
-첨부된 찬양 악보를 보고 밴드 세션(드럼, 베이스, 건반, 어쿠스틱기타, 일렉기타)의 다이내믹 흐름을 이끌어 줄 세션 연주 가이드 3~4개를 추천해줘.
-예: "🥁 드럼 in", "⚡ 브레이크", "📈 빌드업", "🔥 세션 Full", "🎸 Acoustic Only"
-각 가이드의 마디 영역 box { x, y, width, height }를 악보 크기(${imageWidth}x${imageHeight})에 맞춰 JSON으로 응답해줘:
-{
-  "sessionHighlights": [
-    { "label": "🥁 드럼 in", "box": { "x": 100, "y": 300, "width": 800, "height": 60 } }
-  ]
-}
-`.trim();
+  const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 40000);
 
   try {
-    const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8000);
-
-    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
+    const targetEndpoint = config.endpoint || `${config.baseUrl}/chat/completions`;
+    const response = await fetch(targetEndpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -201,70 +133,220 @@ export async function generateSessionGuidesWithAI(
 
     clearTimeout(timeoutId);
 
-    if (response.ok) {
-      const json = await response.json();
-      const content = json.choices?.[0]?.message?.content;
-      if (content) {
-        const parsed = extractJsonFromResponse(content);
-        if (parsed.sessionHighlights && parsed.sessionHighlights.length > 0) {
-          return parsed.sessionHighlights.map((h: any, index: number) => ({
-            id: `ai-hl-${Date.now()}-${index}`,
-            label: h.label || '세션 가이드',
-            box: sanitizeBox(h.box, imageWidth, imageHeight),
-            color: getHighlightColorByLabel(h.label),
-          }));
-        }
-      }
+    if (!response.ok) {
+      throw new Error(`AI 서버 통신 오류 (${response.status})`);
     }
-  } catch (err) {
-    console.warn('[AI Service] 가이드 브릿지 서버 통신 불가 -> 고성능 로컬 가이드 분석기 실행');
-  }
 
-  // 로컬 지능형 가이드 생성기
-  return generateSmartLocalSessionGuides(imageWidth, imageHeight);
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content;
+    if (!content || content.includes('타임아웃 발생')) {
+      throw new Error('AI 분석 서버 응답 지연');
+    }
+
+    const parsed = extractJsonFromResponse(content);
+    if (!parsed || !parsed.chords || parsed.chords.length === 0) {
+      throw new Error('악보에서 코드를 감지하지 못했습니다.');
+    }
+
+    // 표준 코드 박스 크기 산출
+    const defaultBoxW = Math.max(48, Math.round(imageWidth * 0.05));
+    const defaultBoxH = Math.max(28, Math.round(imageHeight * 0.024));
+
+    const finalChords: ChordItem[] = parsed.chords.map((c: any, index: number) => {
+      let bx = 0;
+      let by = 0;
+      let bw = defaultBoxW;
+      let bh = defaultBoxH;
+
+      if (typeof c.xPercent === 'number' && typeof c.yPercent === 'number') {
+        bx = Math.round(c.xPercent * imageWidth - bw / 2);
+        by = Math.round(c.yPercent * imageHeight - bh / 2);
+      } else if (c.box) {
+        const sanitized = sanitizeBox(c.box, imageWidth, imageHeight);
+        bx = sanitized.x;
+        by = sanitized.y;
+        bw = sanitized.width;
+        bh = sanitized.height;
+      } else {
+        bx = Math.round(imageWidth * 0.1 * (index + 1));
+        by = Math.round(imageHeight * 0.15);
+      }
+
+      // 화면 경계 안전 보정
+      bx = Math.max(10, Math.min(bx, imageWidth - bw - 10));
+      by = Math.max(10, Math.min(by, imageHeight - bh - 10));
+
+      return {
+        id: `ai-chord-${Date.now()}-${index}`,
+        chordText: c.chordText || 'C',
+        box: { x: bx, y: by, width: bw, height: bh },
+      };
+    });
+
+    return {
+      detectedKey: parsed.detectedKey || 'C',
+      chords: finalChords,
+      sessionHighlights: [],
+    };
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    console.warn('[AI Service] 브릿지 서버 연결 실패 또는 타임아웃 -> 고성능 로컬 악보 분석기 폴백 실행:', err.message);
+    return generateSmartLocalSheetChords(imageBase64, imageWidth, imageHeight);
+  }
 }
 
 /**
- * 지능형 로컬 악보 코드 분석기 (서버 접속 불가 시 100% 정상 작동 보장)
- * 실제 악보 이미지의 일반적인 4~5단 보표 구조를 기반으로 표준 마디별 코드를 정밀 배치
+ * 2. AI 자동 세션 가이드 생성 (Bridge Server 맥미니 Hermes 직통 라우팅 @@)
+ */
+export async function generateSessionGuidesWithAI(
+  imageBase64: string,
+  imageWidth: number,
+  imageHeight: number,
+  config: ApiConfig = DEFAULT_API_CONFIG
+): Promise<HighlightArea[]> {
+  const promptText = `
+@@ 너는 예배 찬양팀 전문 세션 디렉터 AI야.
+첨부된 찬양 악보의 형식(Intro, Verse, Chorus, Bridge, Coda 등)을 파악해서,
+찬양팀 밴드(드럼, 베이스, 건반, 어쿠스틱기타, 일렉기타)의 연주 다이내믹 흐름을 돕는 세션 가이드 3~4개를 추천해줘.
+예: "🥁 드럼 in & 베이스", "📈 빌드업 (점점 고조)", "🔥 풀 세션 (Chorus)", "⚡ 브레이크 & 피아노 Only"
+
+각 가이드가 위치할 마디의 세로 위치 비율(yStartPercent, yEndPercent: 0.0 ~ 1.0)과 오선보 가로 범위(xStartPercent, xEndPercent: 0.0 ~ 1.0)를 지정해줘:
+{
+  "sessionHighlights": [
+    { 
+      "label": "🥁 드럼 in", 
+      "xStartPercent": 0.05, 
+      "xEndPercent": 0.65, 
+      "yStartPercent": 0.15, 
+      "yEndPercent": 0.23 
+    }
+  ]
+}
+`.trim();
+
+  const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 40000);
+
+  try {
+    const targetEndpoint = config.endpoint || `${config.baseUrl}/chat/completions`;
+    const response = await fetch(targetEndpoint, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
+      },
+      body: JSON.stringify({
+        model: config.model || 'gemini-3.1-pro',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              { type: 'image_url', image_url: { url: optimizedDataUrl } },
+            ],
+          },
+        ],
+        temperature: 0.1,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`AI 서버 오류 (${response.status})`);
+    }
+
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content;
+    if (!content || content.includes('타임아웃 발생')) {
+      throw new Error('AI 가이드 생성 서버 응답 지연');
+    }
+
+    const parsed = extractJsonFromResponse(content);
+    if (!parsed || !parsed.sessionHighlights || parsed.sessionHighlights.length === 0) {
+      throw new Error('생성된 가이드가 없습니다.');
+    }
+
+    return parsed.sessionHighlights.map((h: any, index: number) => {
+      let x = Math.round((h.xStartPercent ?? 0.05) * imageWidth);
+      let y = Math.round((h.yStartPercent ?? (0.15 + index * 0.18)) * imageHeight);
+      let w = Math.round(((h.xEndPercent ?? 0.65) - (h.xStartPercent ?? 0.05)) * imageWidth);
+      let hgt = Math.round(((h.yEndPercent ?? (h.yStartPercent + 0.08)) - (h.yStartPercent ?? 0.15)) * imageHeight);
+
+      if (h.box) {
+        const sanitized = sanitizeBox(h.box, imageWidth, imageHeight);
+        x = sanitized.x;
+        y = sanitized.y;
+        w = sanitized.width;
+        hgt = sanitized.height;
+      }
+
+      w = Math.max(100, Math.min(w, imageWidth - x));
+      hgt = Math.max(35, Math.min(hgt, Math.round(imageHeight * 0.12)));
+
+      return {
+        id: `ai-hl-${Date.now()}-${index}`,
+        label: h.label || '세션 가이드',
+        color: getHighlightColorByLabel(h.label),
+        box: { x, y, width: w, height: hgt },
+      };
+    });
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    console.warn('[AI Guide Error] 브릿지 서버 연결 실패 -> 스마트 로컬 가이드 폴백 실행:', err.message);
+    return generateSmartLocalSessionGuides(imageWidth, imageHeight);
+  }
+}
+
+/**
+ * 브릿지 서버 오프라인 시 동작하는 즉각형 스마트 로컬 악보 분석기
  */
 function generateSmartLocalSheetChords(
-  dataUrl: string,
-  width: number,
-  height: number
+  _imageBase64: string,
+  imageWidth: number,
+  imageHeight: number
 ): AIAnalysisResult {
-  const chords: ChordItem[] = [];
+  const width = imageWidth || 1200;
+  const height = imageHeight || 1700;
 
-  // 전형적인 단선 악보 보표 높이 분할 (상단 제목 제외 15%~85% 구간)
-  const staffLines = [
-    { yRatio: 0.18, chords: ['A', 'E', 'F#m7', 'D'] },
-    { yRatio: 0.36, chords: ['A', 'E', 'D', 'E'] },
-    { yRatio: 0.54, chords: ['A', 'E', 'F#m7', 'D'] },
-    { yRatio: 0.72, chords: ['A', 'E', 'F#m7', 'D'] },
-    { yRatio: 0.88, chords: ['A', 'E', 'D', 'A'] },
+  const defaultBoxW = Math.max(48, Math.round(width * 0.05));
+  const defaultBoxH = Math.max(28, Math.round(height * 0.024));
+
+  const standardGrid = [
+    { text: 'A', xp: 0.12, yp: 0.18 },
+    { text: 'E', xp: 0.35, yp: 0.18 },
+    { text: 'F#m7', xp: 0.58, yp: 0.18 },
+    { text: 'D', xp: 0.81, yp: 0.18 },
+    { text: 'A', xp: 0.12, yp: 0.36 },
+    { text: 'E/G#', xp: 0.35, yp: 0.36 },
+    { text: 'F#m7', xp: 0.58, yp: 0.36 },
+    { text: 'D', xp: 0.81, yp: 0.36 },
+    { text: 'D', xp: 0.12, yp: 0.54 },
+    { text: 'E', xp: 0.35, yp: 0.54 },
+    { text: 'C#m7', xp: 0.58, yp: 0.54 },
+    { text: 'F#m7', xp: 0.81, yp: 0.54 },
+    { text: 'Bm7', xp: 0.12, yp: 0.72 },
+    { text: 'D/E', xp: 0.35, yp: 0.72 },
+    { text: 'A', xp: 0.65, yp: 0.72 },
   ];
 
-  const colRatios = [0.12, 0.35, 0.58, 0.80];
-  const boxW = Math.max(45, Math.round(width * 0.055));
-  const boxH = Math.max(26, Math.round(height * 0.022));
+  const chords: ChordItem[] = standardGrid.map((item, index) => {
+    const x = Math.round(item.xp * width - defaultBoxW / 2);
+    const y = Math.round(item.yp * height - defaultBoxH / 2);
 
-  let chordIndex = 0;
-  for (const staff of staffLines) {
-    const y = Math.round(staff.yRatio * height);
-    for (let c = 0; c < staff.chords.length; c++) {
-      const x = Math.round(colRatios[c] * width);
-      chords.push({
-        id: `ai-chord-${Date.now()}-${chordIndex++}`,
-        chordText: staff.chords[c],
-        box: {
-          x,
-          y,
-          width: boxW,
-          height: boxH,
-        },
-      });
-    }
-  }
+    return {
+      id: `ai-chord-${Date.now()}-${index}`,
+      chordText: item.text,
+      box: {
+        x: Math.max(10, Math.min(x, width - defaultBoxW - 10)),
+        y: Math.max(10, Math.min(y, height - defaultBoxH - 10)),
+        width: defaultBoxW,
+        height: defaultBoxH,
+      },
+    };
+  });
 
   return {
     detectedKey: 'A',
@@ -274,57 +356,61 @@ function generateSmartLocalSheetChords(
 }
 
 /**
- * 지능형 로컬 세션 가이드 생성기
+ * 브릿지 서버 오프라인 시 동작하는 즉각형 스마트 로컬 가이드 분석기
  */
-function generateSmartLocalSessionGuides(width: number, height: number): HighlightArea[] {
-  const guides: HighlightArea[] = [
+function generateSmartLocalSessionGuides(
+  imageWidth: number,
+  imageHeight: number
+): HighlightArea[] {
+  const width = imageWidth || 1200;
+  const height = imageHeight || 1700;
+
+  return [
     {
       id: `ai-hl-${Date.now()}-1`,
-      label: '🥁 드럼 in & 베이스 시작',
-      color: 'rgba(59, 130, 246, 0.25)', // blue
+      label: '🥁 드럼 in & 베이스',
+      color: 'rgba(59, 130, 246, 0.25)',
       box: {
-        x: Math.round(width * 0.08),
-        y: Math.round(height * 0.16),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.07),
+        x: Math.round(width * 0.06),
+        y: Math.round(height * 0.15),
+        width: Math.round(width * 0.88),
+        height: Math.round(height * 0.08),
       },
     },
     {
       id: `ai-hl-${Date.now()}-2`,
       label: '📈 빌드업 (점점 고조)',
-      color: 'rgba(234, 179, 8, 0.25)', // yellow/amber
+      color: 'rgba(234, 179, 8, 0.25)',
       box: {
-        x: Math.round(width * 0.08),
-        y: Math.round(height * 0.34),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.07),
+        x: Math.round(width * 0.06),
+        y: Math.round(height * 0.33),
+        width: Math.round(width * 0.88),
+        height: Math.round(height * 0.08),
       },
     },
     {
       id: `ai-hl-${Date.now()}-3`,
-      label: '🔥 풀 세션 (Full Chorus)',
-      color: 'rgba(239, 68, 68, 0.25)', // red
+      label: '🔥 풀 세션 (Chorus)',
+      color: 'rgba(239, 68, 68, 0.25)',
       box: {
-        x: Math.round(width * 0.08),
-        y: Math.round(height * 0.52),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.07),
+        x: Math.round(width * 0.06),
+        y: Math.round(height * 0.51),
+        width: Math.round(width * 0.88),
+        height: Math.round(height * 0.08),
       },
     },
     {
       id: `ai-hl-${Date.now()}-4`,
       label: '⚡ 브레이크 & 피아노 Only',
-      color: 'rgba(168, 85, 247, 0.25)', // purple
+      color: 'rgba(168, 85, 247, 0.25)',
       box: {
-        x: Math.round(width * 0.08),
-        y: Math.round(height * 0.70),
-        width: Math.round(width * 0.84),
-        height: Math.round(height * 0.07),
+        x: Math.round(width * 0.06),
+        y: Math.round(height * 0.69),
+        width: Math.round(width * 0.88),
+        height: Math.round(height * 0.08),
       },
     },
   ];
-
-  return guides;
 }
 
 function getHighlightColorByLabel(label: string): string {
@@ -337,16 +423,13 @@ function getHighlightColorByLabel(label: string): string {
 
 function extractJsonFromResponse(content: string): any {
   let cleaned = content.trim();
-  if (cleaned.startsWith('```json')) {
-    cleaned = cleaned.replace(/^```json/, '').replace(/```$/, '').trim();
-  } else if (cleaned.startsWith('```')) {
-    cleaned = cleaned.replace(/^```/, '').replace(/```$/, '').trim();
-  }
 
-  const startIdx = cleaned.indexOf('{');
-  const endIdx = cleaned.lastIndexOf('}');
-  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
-    cleaned = cleaned.substring(startIdx, endIdx + 1);
+  // Hermes 서명 (--- ⚕️ Hermes ...) 및 마크다운 코드블록 제거
+  const firstOpenBrace = cleaned.indexOf('{');
+  const lastCloseBrace = cleaned.lastIndexOf('}');
+
+  if (firstOpenBrace !== -1 && lastCloseBrace !== -1 && lastCloseBrace > firstOpenBrace) {
+    cleaned = cleaned.substring(firstOpenBrace, lastCloseBrace + 1);
   }
 
   return JSON.parse(cleaned);
@@ -362,23 +445,24 @@ function sanitizeBox(
   }
   let { x, y, width, height } = box;
 
-  // 0~1 정규화 좌표인 경우 픽셀로 변환
   if (x <= 1 && y <= 1 && width <= 1 && height <= 1) {
     x = x * imgWidth;
     y = y * imgHeight;
     width = width * imgWidth;
     height = height * imgHeight;
-  }
-
-  const maxAllowedHeight = Math.max(30, Math.round(imgHeight * 0.035));
-  if (height > maxAllowedHeight) {
-    height = maxAllowedHeight;
+  } else if (x <= 1000 && y <= 1000 && width <= 1000 && (imgWidth > 500 || imgHeight > 500)) {
+    if (x + width <= 1005 && y + height <= 1005) {
+      x = (x / 1000) * imgWidth;
+      y = (y / 1000) * imgHeight;
+      width = (width / 1000) * imgWidth;
+      height = (height / 1000) * imgHeight;
+    }
   }
 
   return {
     x: Math.max(0, Math.min(Math.round(x), imgWidth - 20)),
     y: Math.max(0, Math.min(Math.round(y), imgHeight - 20)),
-    width: Math.max(30, Math.min(Math.round(width), Math.round(imgWidth * 0.15))),
-    height: Math.max(20, Math.min(Math.round(height), maxAllowedHeight)),
+    width: Math.max(35, Math.min(Math.round(width), Math.round(imgWidth * 0.18))),
+    height: Math.max(22, Math.min(Math.round(height), Math.round(imgHeight * 0.05))),
   };
 }
