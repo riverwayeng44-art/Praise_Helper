@@ -123,7 +123,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               value={endpoint}
               onChange={(e) => setEndpoint(e.target.value)}
               className="w-full px-3 py-2 text-xs bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="https://your-bridge-server.ts.net/v1/chat/completions"
+              placeholder="https://debian.tailfdf16c.ts.net/v1/chat/completions"
             />
           </div>
 
