@@ -501,12 +501,12 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
       await reRenderSingleSheet(id, set, get);
       await get().saveToStorage();
       get().setToastMessage(`✨ 악보 분석 완료: ${result.chords.length}개 코드 추출 (원곡: ${result.detectedKey} Key)`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Sheet analysis error:', err);
       set((state) => ({
         sheets: state.sheets.map((s) => (s.id === id ? { ...s, isAnalyzing: false } : s)),
       }));
-      get().setToastMessage('⚠️ 악보 분석을 완료할 수 없습니다. 잠시 후 다시 시도해주세요.');
+      get().setToastMessage(err?.message ? `⚠️ ${err.message}` : '⚠️ 악보 분석을 완료할 수 없습니다. 잠시 후 다시 시도해주세요.');
     }
   },
 
@@ -543,12 +543,12 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
       await reRenderSingleSheet(id, set, get);
       await get().saveToStorage();
       get().setToastMessage(`🥁 AI 세션 가이드 생성 완료: ${guides.length}개 연주 구간 추가됨`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Session guide generation error:', err);
       set((state) => ({
         sheets: state.sheets.map((s) => (s.id === id ? { ...s, isAnalyzing: false } : s)),
       }));
-      get().setToastMessage('⚠️ 세션 가이드 생성 중 오류가 발생했습니다.');
+      get().setToastMessage(err?.message ? `⚠️ ${err.message}` : '⚠️ 세션 가이드 생성 중 오류가 발생했습니다.');
     }
   },
 

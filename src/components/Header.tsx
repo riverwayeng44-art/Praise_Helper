@@ -5,10 +5,7 @@ import {
   Sun, 
   Moon, 
   Settings, 
-  Eye, 
-  EyeOff,
-  FolderPlus,
-  Save,
+  Save, 
   CheckCircle2
 } from 'lucide-react';
 import { useSheetStore } from '../store/useSheetStore';
@@ -20,12 +17,9 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
   const { 
     sheets, 
-    showHighlights, 
-    toggleHighlights, 
     startSlideShow, 
     theme, 
     setTheme, 
-    addSampleSheet,
     autoSaveMessage,
     isDirty,
     saveToStorage
@@ -73,29 +67,6 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
           <span className="font-medium text-[11px] font-['Jua'] tracking-wide">{autoSaveMessage}</span>
         </button>
 
-        {/* 세션 하이라이트 오버레이 글로벌 토글 */}
-        <button
-          onClick={() => toggleHighlights()}
-          className={`flex items-center gap-1.5 px-3 py-2 text-xs rounded-lg border transition-all shadow-sm ${
-            showHighlights
-              ? 'bg-amber-500/10 dark:bg-amber-500/20 border-amber-500/30 dark:border-amber-500/40 text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 dark:hover:bg-amber-500/30'
-              : 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
-          }`}
-          title="악보 위 세션 가이드(드럼 in, 브레이크 등) 하이라이트를 켜거나 끕니다"
-        >
-          {showHighlights ? (
-            <>
-              <Eye className="w-4 h-4 text-amber-500 dark:text-amber-400" />
-              <span>세션 가이드 ON</span>
-            </>
-          ) : (
-            <>
-              <EyeOff className="w-4 h-4 text-slate-400 dark:text-slate-500" />
-              <span>세션 가이드 OFF</span>
-            </>
-          )}
-        </button>
-
         {/* 연주자용 풀스크린 슬라이드 쇼 (PPT 모드) 버튼 */}
         <button
           onClick={() => startSlideShow()}
@@ -108,9 +79,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
           title={sheets.length > 0 ? "연주자용 전체화면 슬라이드 쇼 실행 (F11/방향키)" : "악보를 먼저 등록해주세요"}
         >
           <Presentation className="w-4 h-4" />
-          <span>PPT 슬라이드 쇼</span>
+          <span className="font-['Jua']">PPT 슬라이드 쇼</span>
           {sheets.length > 0 && (
-            <span className="text-xs px-1.5 py-0.2 rounded bg-black/10 dark:bg-black/20 text-slate-900 font-mono">
+            <span className="text-xs px-2 py-0.5 rounded bg-black/10 dark:bg-black/20 text-slate-900 font-['Jua'] tracking-wide">
               {sheets.length}곡
             </span>
           )}

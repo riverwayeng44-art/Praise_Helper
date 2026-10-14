@@ -14,6 +14,14 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/bridge-api': {
+        target: 'https://debian.tailfdf16c.ts.net',
+        changeOrigin: true,
+        rewrite: (p) => p.replace(/^\/bridge-api/, ''),
+        secure: false,
+      },
+    },
   },
   build: {
     outDir: 'dist',

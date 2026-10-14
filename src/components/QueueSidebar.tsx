@@ -51,9 +51,9 @@ export const QueueSidebar: React.FC = () => {
       <div className="p-4 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Music2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
-          <h2 className="font-bold text-slate-900 dark:text-slate-100 text-sm">찬양 콘티 큐 (순서)</h2>
+          <h2 className="font-bold text-slate-900 dark:text-slate-100 text-sm font-['Jua'] tracking-wide">찬양 콘티 큐 (순서)</h2>
         </div>
-        <span className="text-xs px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-slate-700 font-mono">
+        <span className="text-xs px-2.5 py-0.5 rounded-md bg-emerald-50 dark:bg-slate-800 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-slate-700 font-['Jua'] tracking-wide">
           {sheets.length}곡 등록됨
         </span>
       </div>

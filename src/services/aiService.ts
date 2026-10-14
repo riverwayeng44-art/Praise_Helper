@@ -15,6 +15,28 @@ export interface AIAnalysisResult {
 }
 
 /**
+ * 로컬 개발 환경(localhost)일 경우 Vite 프록시(/bridge-api)로 자동 라우팅하여 CORS 회피
+ */
+function resolveEndpoint(endpoint: string): string {
+  if (typeof window !== 'undefined') {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isLocal && endpoint.includes('debian.tailfdf16c.ts.net')) {
+      return endpoint.replace('https://debian.tailfdf16c.ts.net', '/bridge-api');
+    }
+  }
+  return endpoint;
+}
+
+/**
+ * Google Gemini 공식 REST API 키 여부 확인
+ */
+function isGoogleGeminiKeyOrEndpoint(config: ApiConfig): boolean {
+  if (config.apiKey && config.apiKey.startsWith('AIza')) return true;
+  if (config.endpoint && config.endpoint.includes('generativelanguage.googleapis.com')) return true;
+  return false;
+}
+
+/**
  * 전송용 이미지 최적화 (글자 및 오선 선명도 극대화: 최대 2200px, 95% 품질)
  */
 async function createOptimizedDataUrl(originalDataUrl: string): Promise<string> {
@@ -60,6 +82,11 @@ export async function analyzeSheetMusicWithAI(
   imageHeight: number,
   config: ApiConfig = DEFAULT_API_CONFIG
 ): Promise<AIAnalysisResult> {
+  // 1. 스마트 시뮬레이션 모드 활성화 시 오프라인 모의 분석
+  if (config.useMock) {
+    return generateSimulatedAnalysis(imageWidth, imageHeight);
+  }
+
   const promptText = `
 @@ 너는 찬양팀 악보 및 음악 화성학 최고 전문가 AI야.
 첨부된 찬양 악보 이미지를 정밀 분석해서 인쇄된 모든 음악 코드를 추출하고 정확한 조성을 찾아줘.
@@ -89,36 +116,78 @@ export async function analyzeSheetMusicWithAI(
   const timeoutId = setTimeout(() => controller.abort(), 40000);
 
   try {
-    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
-      },
-      body: JSON.stringify({
-        model: config.model || 'gemini-3.1-pro',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: promptText },
-              { type: 'image_url', image_url: { url: optimizedDataUrl } },
-            ],
+    let content = '';
+
+    if (isGoogleGeminiKeyOrEndpoint(config)) {
+      // Direct Google Gemini API 통신 (웹 브라우저 CORS 완벽 지원)
+      const model = config.model?.startsWith('gemini') ? config.model : 'gemini-2.5-flash';
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
+      const base64Data = optimizedDataUrl.split(',')[1] || optimizedDataUrl;
+
+      const response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: promptText },
+                { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: 'application/json',
           },
-        ],
-        temperature: 0.1,
-      }),
-      signal: controller.signal,
-    });
+        }),
+        signal: controller.signal,
+      });
 
-    clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`AI 서버 통신 오류 (${response.status})`);
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(`Google Gemini API 오류 (${response.status}): ${errJson.error?.message || response.statusText}`);
+      }
+
+      const json = await response.json();
+      content = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      // Bridge Server (OpenAI 호환 API)
+      const targetEndpoint = resolveEndpoint(config.endpoint || `${config.baseUrl}/chat/completions`);
+      const response = await fetch(targetEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
+        },
+        body: JSON.stringify({
+          model: config.model || 'gemini-3.1-pro',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: promptText },
+                { type: 'image_url', image_url: { url: optimizedDataUrl } },
+              ],
+            },
+          ],
+          temperature: 0.1,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`AI 서버 통신 오류 (${response.status})`);
+      }
+
+      const json = await response.json();
+      content = json.choices?.[0]?.message?.content || '';
     }
 
-    const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
     if (!content || content.includes('타임아웃 발생')) {
       throw new Error('AI 분석 서버 응답 지연');
     }
@@ -175,6 +244,15 @@ export async function analyzeSheetMusicWithAI(
   } catch (err: any) {
     clearTimeout(timeoutId);
     console.error('[AI Service Error]', err);
+
+    if (err.name === 'AbortError') {
+      throw new Error('AI 분석 서버 응답 시간이 초과되었습니다 (40초 타임아웃).');
+    }
+    if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
+      throw new Error(
+        '브릿지 서버(debian) CORS/네트워크 연결 제한: 브라우저 보안 정책으로 직접 연결이 제한되었습니다. [설정 ⚙️]에서 Google Gemini API Key를 등록하거나 로컬 환경에서 실행해주세요.'
+      );
+    }
     throw err;
   }
 }
@@ -188,6 +266,10 @@ export async function generateSessionGuidesWithAI(
   imageHeight: number,
   config: ApiConfig = DEFAULT_API_CONFIG
 ): Promise<HighlightArea[]> {
+  if (config.useMock) {
+    return generateSimulatedGuides(imageWidth, imageHeight);
+  }
+
   const promptText = `
 @@ 너는 예배 찬양팀 전문 세션 디렉터 AI야.
 첨부된 찬양 악보의 형식(Intro, Verse, Chorus, Bridge, Coda 등)을 파악해서,
@@ -213,36 +295,76 @@ export async function generateSessionGuidesWithAI(
   const timeoutId = setTimeout(() => controller.abort(), 40000);
 
   try {
-    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
-      },
-      body: JSON.stringify({
-        model: config.model || 'gemini-3.1-pro',
-        messages: [
-          {
-            role: 'user',
-            content: [
-              { type: 'text', text: promptText },
-              { type: 'image_url', image_url: { url: optimizedDataUrl } },
-            ],
+    let content = '';
+
+    if (isGoogleGeminiKeyOrEndpoint(config)) {
+      const model = config.model?.startsWith('gemini') ? config.model : 'gemini-2.5-flash';
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
+      const base64Data = optimizedDataUrl.split(',')[1] || optimizedDataUrl;
+
+      const response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [
+                { text: promptText },
+                { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.1,
+            responseMimeType: 'application/json',
           },
-        ],
-        temperature: 0.1,
-      }),
-      signal: controller.signal,
-    });
+        }),
+        signal: controller.signal,
+      });
 
-    clearTimeout(timeoutId);
+      clearTimeout(timeoutId);
 
-    if (!response.ok) {
-      throw new Error(`AI 서버 오류 (${response.status})`);
+      if (!response.ok) {
+        const errJson = await response.json().catch(() => ({}));
+        throw new Error(`Google Gemini API 오류 (${response.status}): ${errJson.error?.message || response.statusText}`);
+      }
+
+      const json = await response.json();
+      content = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else {
+      const targetEndpoint = resolveEndpoint(config.endpoint || `${config.baseUrl}/chat/completions`);
+      const response = await fetch(targetEndpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
+        },
+        body: JSON.stringify({
+          model: config.model || 'gemini-3.1-pro',
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: promptText },
+                { type: 'image_url', image_url: { url: optimizedDataUrl } },
+              ],
+            },
+          ],
+          temperature: 0.1,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`AI 서버 오류 (${response.status})`);
+      }
+
+      const json = await response.json();
+      content = json.choices?.[0]?.message?.content || '';
     }
 
-    const json = await response.json();
-    const content = json.choices?.[0]?.message?.content;
     if (!content || content.includes('타임아웃 발생')) {
       throw new Error('AI 가이드 생성 서버 응답 지연');
     }
@@ -271,6 +393,15 @@ export async function generateSessionGuidesWithAI(
   } catch (err: any) {
     clearTimeout(timeoutId);
     console.error('[AI Guide Error]', err);
+
+    if (err.name === 'AbortError') {
+      throw new Error('AI 가이드 생성 서버 응답 시간이 초과되었습니다 (40초 타임아웃).');
+    }
+    if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
+      throw new Error(
+        '브릿지 서버(debian) CORS/네트워크 연결 제한: 브라우저 보안 정책으로 직접 연결이 제한되었습니다. [설정 ⚙️]에서 Google Gemini API Key를 등록하거나 로컬 환경에서 실행해주세요.'
+      );
+    }
     throw err;
   }
 }
@@ -320,4 +451,67 @@ function sanitizeBox(
     width: Math.max(35, Math.min(Math.round(width), Math.round(imgWidth * 0.18))),
     height: Math.max(22, Math.min(Math.round(height), Math.round(imgHeight * 0.05))),
   };
+}
+
+/**
+ * 스마트 시뮬레이션 모의 분석 헬퍼 (오프라인 / 데모 전용)
+ */
+function generateSimulatedAnalysis(imageWidth: number, imageHeight: number): AIAnalysisResult {
+  const sampleChords = [
+    { chordText: 'G', xPercent: 0.12, yPercent: 0.18 },
+    { chordText: 'D/F#', xPercent: 0.35, yPercent: 0.18 },
+    { chordText: 'Em7', xPercent: 0.58, yPercent: 0.18 },
+    { chordText: 'Cadd9', xPercent: 0.80, yPercent: 0.18 },
+    { chordText: 'G/B', xPercent: 0.12, yPercent: 0.36 },
+    { chordText: 'Am7', xPercent: 0.35, yPercent: 0.36 },
+    { chordText: 'Dsus4', xPercent: 0.58, yPercent: 0.36 },
+    { chordText: 'G', xPercent: 0.80, yPercent: 0.36 },
+  ];
+
+  const chords: ChordItem[] = sampleChords.map((c, i) => {
+    const baseW = Math.max(14, Math.round(imageWidth * 0.011));
+    const bw = Math.max(26, Math.min(Math.round(baseW * Math.max(1.2, c.chordText.length + 0.8)), 80));
+    const bh = Math.max(22, Math.round(imageHeight * 0.022));
+    const bx = Math.round(c.xPercent * imageWidth - bw / 2);
+    const by = Math.round(c.yPercent * imageHeight - bh / 2);
+
+    return {
+      id: `sim-chord-${Date.now()}-${i}`,
+      chordText: c.chordText,
+      box: { x: bx, y: by, width: bw, height: bh },
+    };
+  });
+
+  return {
+    detectedKey: 'G',
+    chords,
+    sessionHighlights: [],
+  };
+}
+
+function generateSimulatedGuides(imageWidth: number, imageHeight: number): HighlightArea[] {
+  return [
+    {
+      id: `sim-hl-${Date.now()}-1`,
+      label: '🥁 드럼 in & 베이스',
+      color: 'rgba(59, 130, 246, 0.25)',
+      box: {
+        x: Math.round(imageWidth * 0.05),
+        y: Math.round(imageHeight * 0.15),
+        width: Math.round(imageWidth * 0.45),
+        height: Math.round(imageHeight * 0.08),
+      },
+    },
+    {
+      id: `sim-hl-${Date.now()}-2`,
+      label: '🔥 풀 세션 (Chorus)',
+      color: 'rgba(239, 68, 68, 0.25)',
+      box: {
+        x: Math.round(imageWidth * 0.05),
+        y: Math.round(imageHeight * 0.52),
+        width: Math.round(imageWidth * 0.90),
+        height: Math.round(imageHeight * 0.08),
+      },
+    },
+  ];
 }

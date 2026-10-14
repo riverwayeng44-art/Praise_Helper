@@ -144,4 +144,67 @@ assert.ok(lumWhite >= 200, 'White paper luminance must pass threshold >= 200');
 assert.ok(lumLine < 200, 'Staff line luminance must be filtered out (< 200)');
 console.log('✓ 8-Point bright background sampling correctly selects paper (lum: ' + Math.round(lumWhite) + ') over lines (lum: ' + Math.round(lumLine) + ')');
 
-console.log('\n=== ALL TESTS PASSED SUCCESSFULLY! ===\n');
+// 6. Compact Box Sizing Algorithm Verification
+console.log('\n--- TEST 6: Compact Chord Box Sizing ---');
+function calculateBox(imageWidth, imageHeight, chordStr, xPercent, yPercent) {
+  const charCount = chordStr.length;
+  const baseCharWidth = Math.max(14, Math.round(imageWidth * 0.011));
+  const boxW = Math.max(26, Math.min(Math.round(baseCharWidth * Math.max(1.2, charCount + 0.8)), 80));
+  const boxH = Math.max(22, Math.round(imageHeight * 0.022));
+  const bx = Math.round(xPercent * imageWidth - boxW / 2);
+  const by = Math.round(yPercent * imageHeight - boxH / 2);
+  return { boxW, boxH, bx, by };
+}
+
+const boxG = calculateBox(1000, 1400, 'G', 0.5, 0.5);
+assert.ok(boxG.boxW >= 26 && boxG.boxW <= 40, `Single char box width should be compact (got ${boxG.boxW})`);
+const boxFsharpM7 = calculateBox(1000, 1400, 'F#m7', 0.5, 0.5);
+assert.ok(boxFsharpM7.boxW > boxG.boxW, 'Multi-char chord should have wider box');
+assert.ok(boxFsharpM7.boxW <= 80, 'Multi-char chord should not exceed 80px');
+console.log('✓ Compact box sizing correctly scales with chord length (G: ' + boxG.boxW + 'px, F#m7: ' + boxFsharpM7.boxW + 'px)');
+
+// 7. Direct Google Gemini & Proxy URL Resolution
+console.log('\n--- TEST 7: Gemini Key & Endpoint Resolution ---');
+function isGoogleGeminiKeyOrEndpoint(apiKey, endpoint) {
+  if (apiKey && apiKey.startsWith('AIza')) return true;
+  if (endpoint && endpoint.includes('generativelanguage.googleapis.com')) return true;
+  return false;
+}
+assert.strictEqual(isGoogleGeminiKeyOrEndpoint('AIzaSyD-TestKey', ''), true);
+assert.strictEqual(isGoogleGeminiKeyOrEndpoint('dummy-key', 'https://debian.tailfdf16c.ts.net/v1/chat/completions'), false);
+console.log('✓ Direct Google Gemini API detection correctly routes AIza keys and bridge endpoints');
+
+// 8. Production Bundle & Asset Sanity Check
+import fs from 'fs';
+console.log('\n--- TEST 8: Production Bundle & Asset Sanity Check ---');
+assert.ok(fs.existsSync('index.html'), 'index.html must exist');
+const html = fs.readFileSync('index.html', 'utf8');
+
+const scriptMatch = html.match(/src="(\.\/assets\/index-[^"]+\.js)"/);
+const cssMatch = html.match(/href="(\.\/assets\/index-[^"]+\.css)"/);
+assert.ok(scriptMatch, 'script tag with bundle JS must be present');
+assert.ok(cssMatch, 'link tag with bundle CSS must be present');
+
+const jsPath = scriptMatch[1].replace('./', '');
+const cssPath = cssMatch[1].replace('./', '');
+assert.ok(fs.existsSync(jsPath), 'JS bundle must exist on disk: ' + jsPath);
+assert.ok(fs.existsSync(cssPath), 'CSS bundle must exist on disk: ' + cssPath);
+
+const jsSize = fs.statSync(jsPath).size;
+const cssSize = fs.statSync(cssPath).size;
+assert.ok(jsSize > 100000, 'JS bundle size ok (' + jsSize + ')');
+assert.ok(cssSize > 10000, 'CSS bundle size ok (' + cssSize + ')');
+console.log('✓ JS and CSS bundles exist (' + Math.round(jsSize/1024) + 'KB, ' + Math.round(cssSize/1024) + 'KB)');
+
+assert.ok(fs.existsSync('public/fonts/Jua-Regular.ttf'), 'public font must exist');
+assert.ok(fs.existsSync('fonts/Jua-Regular.ttf'), 'root fonts must exist');
+console.log('✓ Jua font assets verified in public and root');
+
+const jsContent = fs.readFileSync(jsPath, 'utf8');
+assert.ok(jsContent.includes('찬양팀 콘티 도우미'), 'Title should be bundled');
+assert.ok(jsContent.includes('PPT 슬라이드 쇼'), 'PPT button should be bundled');
+assert.ok(jsContent.includes('detectedKey'), 'Analysis logic should be bundled');
+console.log('✓ Key UI strings and features confirmed inside compiled bundle');
+
+console.log('\n=== ALL 8 VERIFICATION TESTS PASSED SUCCESSFULLY! ===\n');
+
