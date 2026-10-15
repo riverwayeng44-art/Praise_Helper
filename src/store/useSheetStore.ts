@@ -148,7 +148,10 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
           activeSheetId: saved.sheets[0]?.id || null,
           showHighlights: saved.showHighlights ?? true,
           theme: saved.theme || 'dark',
-          apiConfig: saved.apiConfig || DEFAULT_API_CONFIG,
+          apiConfig: {
+            ...DEFAULT_API_CONFIG,
+            ...(saved.apiConfig || {}),
+          },
           lastSavedAt: saved.lastSavedAt || Date.now(),
           isDirty: false,
           autoSaveMessage: '이전 작업 내용 복원됨',

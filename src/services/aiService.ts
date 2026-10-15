@@ -4,7 +4,7 @@ export const DEFAULT_API_CONFIG: ApiConfig = {
   baseUrl: 'https://debian.tailfdf16c.ts.net/v1',
   endpoint: 'https://debian.tailfdf16c.ts.net/v1/chat/completions',
   apiKey: 'dummy-key',
-  model: 'gemini-3.1-pro',
+  model: 'gemini-3.5-flash',
   useMock: false,
 };
 
@@ -113,7 +113,7 @@ export async function analyzeSheetMusicWithAI(
 
   const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 40000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
     let content = '';
@@ -156,6 +156,7 @@ export async function analyzeSheetMusicWithAI(
     } else {
       // Bridge Server (OpenAI 호환 API)
       const targetEndpoint = resolveEndpoint(config.endpoint || `${config.baseUrl}/chat/completions`);
+      const requestModel = config.model === 'gemini-3.1-pro' ? 'gemini-3.5-flash' : (config.model || 'gemini-3.5-flash');
       const response = await fetch(targetEndpoint, {
         method: 'POST',
         headers: {
@@ -163,7 +164,7 @@ export async function analyzeSheetMusicWithAI(
           Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
         },
         body: JSON.stringify({
-          model: config.model || 'gemini-3.1-pro',
+          model: requestModel,
           messages: [
             {
               role: 'user',
@@ -246,12 +247,10 @@ export async function analyzeSheetMusicWithAI(
     console.error('[AI Service Error]', err);
 
     if (err.name === 'AbortError') {
-      throw new Error('AI 분석 서버 응답 시간이 초과되었습니다 (40초 타임아웃).');
+      throw new Error('AI 분석 서버 응답 시간이 초과되었습니다 (60초 타임아웃).');
     }
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-      throw new Error(
-        '브릿지 서버(debian) CORS/네트워크 연결 제한: 브라우저 보안 정책으로 직접 연결이 제한되었습니다. [설정 ⚙️]에서 Google Gemini API Key를 등록하거나 로컬 환경에서 실행해주세요.'
-      );
+      throw new Error('AI 분석 서버 통신 오류: 네트워크 연결 상태를 확인해주세요.');
     }
     throw err;
   }
@@ -292,7 +291,7 @@ export async function generateSessionGuidesWithAI(
 
   const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 40000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
     let content = '';
@@ -333,6 +332,7 @@ export async function generateSessionGuidesWithAI(
       content = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
     } else {
       const targetEndpoint = resolveEndpoint(config.endpoint || `${config.baseUrl}/chat/completions`);
+      const requestModel = config.model === 'gemini-3.1-pro' ? 'gemini-3.5-flash' : (config.model || 'gemini-3.5-flash');
       const response = await fetch(targetEndpoint, {
         method: 'POST',
         headers: {
@@ -340,7 +340,7 @@ export async function generateSessionGuidesWithAI(
           Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
         },
         body: JSON.stringify({
-          model: config.model || 'gemini-3.1-pro',
+          model: requestModel,
           messages: [
             {
               role: 'user',
@@ -395,12 +395,10 @@ export async function generateSessionGuidesWithAI(
     console.error('[AI Guide Error]', err);
 
     if (err.name === 'AbortError') {
-      throw new Error('AI 가이드 생성 서버 응답 시간이 초과되었습니다 (40초 타임아웃).');
+      throw new Error('AI 가이드 생성 서버 응답 시간이 초과되었습니다 (60초 타임아웃).');
     }
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-      throw new Error(
-        '브릿지 서버(debian) CORS/네트워크 연결 제한: 브라우저 보안 정책으로 직접 연결이 제한되었습니다. [설정 ⚙️]에서 Google Gemini API Key를 등록하거나 로컬 환경에서 실행해주세요.'
-      );
+      throw new Error('AI 분석 서버 통신 오류: 네트워크 연결 상태를 확인해주세요.');
     }
     throw err;
   }

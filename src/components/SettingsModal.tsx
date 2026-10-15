@@ -83,7 +83,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             Authorization: `Bearer ${apiKey || 'dummy-key'}`,
           },
           body: JSON.stringify({
-            model: model || 'gemini-3.1-pro',
+            model: model === 'gemini-3.1-pro' ? 'gemini-3.5-flash' : (model || 'gemini-3.5-flash'),
             messages: [
               {
                 role: 'user',
@@ -104,13 +104,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
       }
     } catch (err: any) {
       setTestStatus('error');
-      if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-        setTestMessage(
-          '연결 실패: 브라우저 CORS 정책으로 직접 연결이 제한되었습니다. Google Gemini API Key(AIza...)를 입력하시면 웹에서도 즉시 분석 가능합니다.'
-        );
-      } else {
-        setTestMessage(`연결 실패: ${err.message || '서버에 도달할 수 없습니다'}`);
-      }
+      setTestMessage(`연결 실패: ${err.message || '서버에 도달할 수 없습니다'}`);
     }
   };
 
