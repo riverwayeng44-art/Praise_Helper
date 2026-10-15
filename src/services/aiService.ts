@@ -113,7 +113,7 @@ export async function analyzeSheetMusicWithAI(
 
   const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000);
 
   try {
     let content = '';
@@ -247,7 +247,7 @@ export async function analyzeSheetMusicWithAI(
     console.error('[AI Service Error]', err);
 
     if (err.name === 'AbortError') {
-      throw new Error('AI 분석 서버 응답 시간이 초과되었습니다 (60초 타임아웃).');
+      throw new Error('AI 분석 서버 응답 시간이 초과되었습니다 (3분 타임아웃).');
     }
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
       throw new Error('AI 분석 서버 통신 오류: 네트워크 연결 상태를 확인해주세요.');
@@ -291,7 +291,7 @@ export async function generateSessionGuidesWithAI(
 
   const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 60000);
+  const timeoutId = setTimeout(() => controller.abort(), 180000);
 
   try {
     let content = '';
@@ -395,7 +395,7 @@ export async function generateSessionGuidesWithAI(
     console.error('[AI Guide Error]', err);
 
     if (err.name === 'AbortError') {
-      throw new Error('AI 가이드 생성 서버 응답 시간이 초과되었습니다 (60초 타임아웃).');
+      throw new Error('AI 가이드 생성 서버 응답 시간이 초과되었습니다 (3분 타임아웃).');
     }
     if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
       throw new Error('AI 분석 서버 통신 오류: 네트워크 연결 상태를 확인해주세요.');
