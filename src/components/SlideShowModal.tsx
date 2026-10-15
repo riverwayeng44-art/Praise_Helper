@@ -155,15 +155,15 @@ export const SlideShowModal: React.FC = () => {
                 {slideIndex + 1}
               </div>
               <div>
-                <h2 className="text-sm font-bold text-white tracking-wide font-['Jua']">
+                <h2 className="text-sm font-bold text-white tracking-wide">
                   {currentSheet.title}
                 </h2>
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="text-emerald-400 font-bold font-mono">
+                  <span className="text-emerald-400 font-bold">
                     {currentSheet.currentKey} Key
                   </span>
                   {semiDiff !== 0 && (
-                    <span className="text-amber-400 font-mono text-[11px]">
+                    <span className="text-amber-400 font-bold text-[12px] tracking-wide">
                       (원곡 {currentSheet.detectedKey}에서 {semiDiff > 0 ? `+${semiDiff}` : semiDiff} 반음)
                     </span>
                   )}

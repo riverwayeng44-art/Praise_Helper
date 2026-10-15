@@ -27,6 +27,7 @@ export interface TextBoxItem {
   text: string;
   box: Box;
   fontSize?: number;
+  fontFamily?: string;      // 글씨체 (예: "Jua", "Dotum", "Gungsuh", "Myeongjo", "Round")
   color?: string;           // 글자 색상 (예: "#2563eb", "#0f172a", "#ef4444")
   backgroundColor?: string; // 박스 배경색 (기본 투명 또는 흰색 반투명)
 }
@@ -39,6 +40,7 @@ export interface AnnotationIconItem {
   iconType: AnnotationType; // '|', '✓', '(', ')'
   box: Box;
   color?: string;           // 기호 색상 (예: "#ef4444", "#2563eb", "#0f172a")
+  strokeWidth?: number;     // 선 두께 (예: 2, 4, 6, 8px)
 }
 
 export interface SheetMusicData {
@@ -57,6 +59,10 @@ export interface SheetMusicData {
   naturalHeight: number;
   isAnalyzing?: boolean;
   notes?: string;
+  videoUrl?: string; // 유튜브 원곡 영상 URL
+  localVideoPath?: string; // 다운로드된 로컬 비디오 파일 경로
+  videoDownloadStatus?: 'idle' | 'downloading' | 'completed' | 'error';
+  videoDownloadProgress?: number; // 0 ~ 100
 }
 
 export interface ApiConfig {

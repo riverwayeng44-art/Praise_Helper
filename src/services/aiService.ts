@@ -4,47 +4,26 @@ export const DEFAULT_API_CONFIG: ApiConfig = {
   baseUrl: 'https://debian.tailfdf16c.ts.net/v1',
   endpoint: 'https://debian.tailfdf16c.ts.net/v1/chat/completions',
   apiKey: 'dummy-key',
-  model: 'gemini-3.5-flash',
+  model: 'gemini-3.1-pro',
   useMock: false,
 };
 
 export interface AIAnalysisResult {
+  detectedTitle?: string;
   detectedKey: string;
   chords: ChordItem[];
   sessionHighlights: HighlightArea[];
 }
 
 /**
- * 로컬 개발 환경(localhost)일 경우 Vite 프록시(/bridge-api)로 자동 라우팅하여 CORS 회피
- */
-function resolveEndpoint(endpoint: string): string {
-  if (typeof window !== 'undefined') {
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    if (isLocal && endpoint.includes('debian.tailfdf16c.ts.net')) {
-      return endpoint.replace('https://debian.tailfdf16c.ts.net', '/bridge-api');
-    }
-  }
-  return endpoint;
-}
-
-/**
- * Google Gemini 공식 REST API 키 여부 확인
- */
-function isGoogleGeminiKeyOrEndpoint(config: ApiConfig): boolean {
-  if (config.apiKey && config.apiKey.startsWith('AIza')) return true;
-  if (config.endpoint && config.endpoint.includes('generativelanguage.googleapis.com')) return true;
-  return false;
-}
-
-/**
- * 전송용 이미지 최적화 (글자 및 오선 선명도 극대화: 최대 2200px, 95% 품질)
+ * 전송용 이미지 최적화 (선명도 유지 및 전송 지연 방지: 최대 1800px, 88% 품질)
  */
 async function createOptimizedDataUrl(originalDataUrl: string): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      const maxDim = 2200;
+      const maxDim = 1800;
       let w = img.naturalWidth || img.width;
       let h = img.naturalHeight || img.height;
 
@@ -63,7 +42,7 @@ async function createOptimizedDataUrl(originalDataUrl: string): Promise<string> 
       canvas.height = h;
       const ctx = canvas.getContext('2d')!;
       ctx.drawImage(img, 0, 0, w, h);
-      resolve(canvas.toDataURL('image/jpeg', 0.95));
+      resolve(canvas.toDataURL('image/jpeg', 0.88));
     };
     img.onerror = () => resolve(originalDataUrl);
     img.src = originalDataUrl;
@@ -82,18 +61,14 @@ export async function analyzeSheetMusicWithAI(
   imageHeight: number,
   config: ApiConfig = DEFAULT_API_CONFIG
 ): Promise<AIAnalysisResult> {
-  // 1. 스마트 시뮬레이션 모드 활성화 시 오프라인 모의 분석
-  if (config.useMock) {
-    return generateSimulatedAnalysis(imageWidth, imageHeight);
-  }
-
   const promptText = `
 @@ 너는 찬양팀 악보 및 음악 화성학 최고 전문가 AI야.
 첨부된 찬양 악보 이미지를 정밀 분석해서 인쇄된 모든 음악 코드를 추출하고 정확한 조성을 찾아줘.
 
 [엄격한 분석 및 좌표 규칙]
-1. "detectedKey": 악보의 원본 조성 (조표의 샵/플랫 개수와 첫/마지막 으뜸음을 분석하여 "A", "G", "C", "D", "E", "F", "Bb", "Eb" 등으로 정확히 판별).
-2. "chords": 오선보(Staff) 바로 위에 인쇄된 영문 코드만 위에서부터 순서대로 정확히 추출해.
+1. "detectedTitle": 악보 맨 윗줄 중앙이나 좌상단에 가장 크게 인쇄된 실제 찬양 곡 제목 (예: "주를 기억하라", "꽃들도", "은혜" 등).
+2. "detectedKey": 악보의 원본 조성 (조표의 샵/플랫 개수와 첫/마지막 으뜸음을 분석하여 "A", "G", "C", "D", "E", "F", "Bb", "Eb" 등으로 정확히 판별).
+3. "chords": 오선보(Staff) 바로 위에 인쇄된 영문 코드만 위에서부터 순서대로 빠짐없이 정확히 추출해.
    - 실제 악보에 인쇄되어 있는 코드만 추출하고, 없는 코드를 임의로 지어내거나 추측해서 채우지 마!
    - 2마디 동안 코드가 1개면 1개만 추출해.
    - 악보 바깥 우측이나 하단의 곡 순서/가사 메모(Intro, V, PC, 드럼 in 등 설명 텍스트)는 악보 코드가 아니므로 절대 chords에 포함하지 마!
@@ -101,8 +76,9 @@ export async function analyzeSheetMusicWithAI(
      * xPercent: 전체 이미지 가로 기준 해당 코드 글자의 중심 X 비율 (0.00 ~ 1.00)
      * yPercent: 전체 이미지 세로 기준 해당 코드 글자의 중심 Y 비율 (0.00 ~ 1.00)
 
-반드시 순수 JSON 객체만 응답해:
+반드시 마크다운이나 추가 설명 없이 순수 JSON 객체만 응답해:
 {
+  "detectedTitle": "주를 기억하라",
   "detectedKey": "A",
   "chords": [
     { "chordText": "A", "xPercent": 0.12, "yPercent": 0.18 },
@@ -113,82 +89,41 @@ export async function analyzeSheetMusicWithAI(
 
   const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
   const controller = new AbortController();
+  // 복잡한 악보(주를 기억하라 등)를 위한 180초(3분) 여유 타임아웃
   const timeoutId = setTimeout(() => controller.abort(), 180000);
 
   try {
-    let content = '';
-
-    if (isGoogleGeminiKeyOrEndpoint(config)) {
-      // Direct Google Gemini API 통신 (웹 브라우저 CORS 완벽 지원)
-      const model = config.model?.startsWith('gemini') ? config.model : 'gemini-2.5-flash';
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
-      const base64Data = optimizedDataUrl.split(',')[1] || optimizedDataUrl;
-
-      const response = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: promptText },
-                { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: 'application/json',
+    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
+      },
+      body: JSON.stringify({
+        model: config.model || 'gemini-3.1-pro',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              { type: 'image_url', image_url: { url: optimizedDataUrl } },
+            ],
           },
-        }),
-        signal: controller.signal,
-      });
+        ],
+        temperature: 0.1,
+        max_tokens: 4096,
+      }),
+      signal: controller.signal,
+    });
 
-      clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(`Google Gemini API 오류 (${response.status}): ${errJson.error?.message || response.statusText}`);
-      }
-
-      const json = await response.json();
-      content = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      // Bridge Server (OpenAI 호환 API)
-      const targetEndpoint = resolveEndpoint(config.endpoint || `${config.baseUrl}/chat/completions`);
-      const requestModel = config.model === 'gemini-3.1-pro' ? 'gemini-3.5-flash' : (config.model || 'gemini-3.5-flash');
-      const response = await fetch(targetEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
-        },
-        body: JSON.stringify({
-          model: requestModel,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: promptText },
-                { type: 'image_url', image_url: { url: optimizedDataUrl } },
-              ],
-            },
-          ],
-          temperature: 0.1,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`AI 서버 통신 오류 (${response.status})`);
-      }
-
-      const json = await response.json();
-      content = json.choices?.[0]?.message?.content || '';
+    if (!response.ok) {
+      throw new Error(`AI 서버 통신 오류 (${response.status})`);
     }
 
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content;
     if (!content || content.includes('타임아웃 발생')) {
       throw new Error('AI 분석 서버 응답 지연');
     }
@@ -238,6 +173,7 @@ export async function analyzeSheetMusicWithAI(
     });
 
     return {
+      detectedTitle: parsed.detectedTitle ? parsed.detectedTitle.trim() : undefined,
       detectedKey: parsed.detectedKey || 'C',
       chords: finalChords,
       sessionHighlights: [],
@@ -245,13 +181,6 @@ export async function analyzeSheetMusicWithAI(
   } catch (err: any) {
     clearTimeout(timeoutId);
     console.error('[AI Service Error]', err);
-
-    if (err.name === 'AbortError') {
-      throw new Error('AI 분석 서버 응답 시간이 초과되었습니다 (3분 타임아웃).');
-    }
-    if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-      throw new Error('AI 분석 서버 통신 오류: 네트워크 연결 상태를 확인해주세요.');
-    }
     throw err;
   }
 }
@@ -265,10 +194,6 @@ export async function generateSessionGuidesWithAI(
   imageHeight: number,
   config: ApiConfig = DEFAULT_API_CONFIG
 ): Promise<HighlightArea[]> {
-  if (config.useMock) {
-    return generateSimulatedGuides(imageWidth, imageHeight);
-  }
-
   const promptText = `
 @@ 너는 예배 찬양팀 전문 세션 디렉터 AI야.
 첨부된 찬양 악보의 형식(Intro, Verse, Chorus, Bridge, Coda 등)을 파악해서,
@@ -280,10 +205,10 @@ export async function generateSessionGuidesWithAI(
   "sessionHighlights": [
     { 
       "label": "🥁 드럼 in", 
-      "xStartPercent": 0.05, 
-      "xEndPercent": 0.65, 
+      "xStartPercent": 0.08, 
       "yStartPercent": 0.15, 
-      "yEndPercent": 0.23 
+      "xEndPercent": 0.92, 
+      "yEndPercent": 0.28 
     }
   ]
 }
@@ -291,115 +216,70 @@ export async function generateSessionGuidesWithAI(
 
   const optimizedDataUrl = await createOptimizedDataUrl(imageBase64);
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 180000);
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   try {
-    let content = '';
-
-    if (isGoogleGeminiKeyOrEndpoint(config)) {
-      const model = config.model?.startsWith('gemini') ? config.model : 'gemini-2.5-flash';
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${config.apiKey}`;
-      const base64Data = optimizedDataUrl.split(',')[1] || optimizedDataUrl;
-
-      const response = await fetch(geminiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                { text: promptText },
-                { inlineData: { mimeType: 'image/jpeg', data: base64Data } },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            responseMimeType: 'application/json',
+    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
+      },
+      body: JSON.stringify({
+        model: config.model || 'gemini-3.1-pro',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              { type: 'image_url', image_url: { url: optimizedDataUrl } },
+            ],
           },
-        }),
-        signal: controller.signal,
-      });
+        ],
+        temperature: 0.2,
+        max_tokens: 2048,
+      }),
+      signal: controller.signal,
+    });
 
-      clearTimeout(timeoutId);
+    clearTimeout(timeoutId);
 
-      if (!response.ok) {
-        const errJson = await response.json().catch(() => ({}));
-        throw new Error(`Google Gemini API 오류 (${response.status}): ${errJson.error?.message || response.statusText}`);
-      }
-
-      const json = await response.json();
-      content = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    } else {
-      const targetEndpoint = resolveEndpoint(config.endpoint || `${config.baseUrl}/chat/completions`);
-      const requestModel = config.model === 'gemini-3.1-pro' ? 'gemini-3.5-flash' : (config.model || 'gemini-3.5-flash');
-      const response = await fetch(targetEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
-        },
-        body: JSON.stringify({
-          model: requestModel,
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: promptText },
-                { type: 'image_url', image_url: { url: optimizedDataUrl } },
-              ],
-            },
-          ],
-          temperature: 0.1,
-        }),
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`AI 서버 오류 (${response.status})`);
-      }
-
-      const json = await response.json();
-      content = json.choices?.[0]?.message?.content || '';
+    if (!response.ok) {
+      throw new Error(`AI 서버 통신 오류 (${response.status})`);
     }
 
-    if (!content || content.includes('타임아웃 발생')) {
-      throw new Error('AI 가이드 생성 서버 응답 지연');
-    }
-
+    const json = await response.json();
+    const content = json.choices?.[0]?.message?.content;
     const parsed = extractJsonFromResponse(content);
+
     if (!parsed || !parsed.sessionHighlights || parsed.sessionHighlights.length === 0) {
-      throw new Error('생성된 가이드가 없습니다.');
+      return [];
     }
 
-    return parsed.sessionHighlights.map((h: any, index: number) => {
-      let x = Math.round((h.xStartPercent ?? 0.05) * imageWidth);
-      let y = Math.round((h.yStartPercent ?? (0.15 + index * 0.18)) * imageHeight);
-      let w = Math.round(((h.xEndPercent ?? 0.65) - (h.xStartPercent ?? 0.05)) * imageWidth);
-      let hgt = Math.round(((h.yEndPercent ?? (h.yStartPercent + 0.08)) - (h.yStartPercent ?? 0.15)) * imageHeight);
+    return parsed.sessionHighlights.map((hl: any, idx: number) => {
+      const xs = hl.xStartPercent ?? 0.08;
+      const ys = hl.yStartPercent ?? 0.15 + idx * 0.2;
+      const xe = hl.xEndPercent ?? 0.92;
+      const ye = hl.yEndPercent ?? ys + 0.12;
 
-      w = Math.max(100, Math.min(w, imageWidth - x));
-      hgt = Math.max(35, Math.min(hgt, Math.round(imageHeight * 0.12)));
+      const bx = Math.round(xs * imageWidth);
+      const by = Math.round(ys * imageHeight);
+      const bw = Math.round((xe - xs) * imageWidth);
+      const bh = Math.round((ye - ys) * imageHeight);
 
       return {
-        id: `ai-hl-${Date.now()}-${index}`,
-        label: h.label || '세션 가이드',
-        color: getHighlightColorByLabel(h.label),
-        box: { x, y, width: w, height: hgt },
+        id: `ai-hl-${Date.now()}-${idx}`,
+        label: hl.label || '세션 가이드',
+        color: getHighlightColorByLabel(hl.label || ''),
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.25)',
+        textColor: '#ffffff',
+        box: { x: bx, y: by, width: Math.max(80, bw), height: Math.max(30, bh) },
       };
     });
   } catch (err: any) {
     clearTimeout(timeoutId);
     console.error('[AI Guide Error]', err);
-
-    if (err.name === 'AbortError') {
-      throw new Error('AI 가이드 생성 서버 응답 시간이 초과되었습니다 (3분 타임아웃).');
-    }
-    if (err.message?.includes('Failed to fetch') || err.name === 'TypeError') {
-      throw new Error('AI 분석 서버 통신 오류: 네트워크 연결 상태를 확인해주세요.');
-    }
     throw err;
   }
 }
@@ -413,9 +293,13 @@ function getHighlightColorByLabel(label: string): string {
 }
 
 function extractJsonFromResponse(content: string): any {
+  if (!content) return null;
   let cleaned = content.trim();
 
-  // Hermes 서명 (--- ⚕️ Hermes ...) 및 마크다운 코드블록 제거
+  // 1. 마크다운 코드 블록 제거 (```json ... ```)
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // 2. 가장 바깥쪽 { 와 } 탐색
   const firstOpenBrace = cleaned.indexOf('{');
   const lastCloseBrace = cleaned.lastIndexOf('}');
 
@@ -423,7 +307,49 @@ function extractJsonFromResponse(content: string): any {
     cleaned = cleaned.substring(firstOpenBrace, lastCloseBrace + 1);
   }
 
-  return JSON.parse(cleaned);
+  // 3. 트레일링 콤마 제거 (, } -> } / , ] -> ])
+  cleaned = cleaned.replace(/,\s*([}\]])/g, '$1');
+
+  try {
+    return JSON.parse(cleaned);
+  } catch (err) {
+    console.warn('[JSON Parse Recovery Triggered]', err);
+
+    // 복구 1단계: 괄호 불균형 닫기
+    let fixed = cleaned;
+    const openBraces = (fixed.match(/\{/g) || []).length;
+    const closeBraces = (fixed.match(/\}/g) || []).length;
+    const openBrackets = (fixed.match(/\[/g) || []).length;
+    const closeBrackets = (fixed.match(/\]/g) || []).length;
+
+    for (let i = 0; i < openBrackets - closeBrackets; i++) fixed += ']';
+    for (let i = 0; i < openBraces - closeBraces; i++) fixed += '}';
+
+    try {
+      return JSON.parse(fixed);
+    } catch (e2) {
+      // 복구 2단계: 정규식으로 chord 객체 전수 구출
+      const chords: any[] = [];
+      const chordRegex = /"chordText"\s*:\s*"([^"]+)"\s*,\s*"xPercent"\s*:\s*([0-9.]+)\s*,\s*"yPercent"\s*:\s*([0-9.]+)/g;
+      let m;
+      while ((m = chordRegex.exec(content)) !== null) {
+        chords.push({
+          chordText: m[1],
+          xPercent: parseFloat(m[2]),
+          yPercent: parseFloat(m[3]),
+        });
+      }
+
+      const keyMatch = content.match(/"detectedKey"\s*:\s*"([^"]+)"/);
+      const detectedKey = keyMatch ? keyMatch[1] : 'C';
+
+      if (chords.length > 0) {
+        return { detectedKey, chords };
+      }
+
+      throw err;
+    }
+  }
 }
 
 function sanitizeBox(
@@ -451,65 +377,260 @@ function sanitizeBox(
   };
 }
 
+export interface HandwritingRecognitionResult {
+  recognizedText: string;
+  category: 'section' | 'symbol' | 'memo';
+  symbolType?: 'bar' | 'check' | 'paren_open' | 'paren_close';
+  suggestedColor: string;
+  suggestedFontSize: number;
+}
+
 /**
- * 스마트 시뮬레이션 모의 분석 헬퍼 (오프라인 / 데모 전용)
+ * 3. AI 필기 텍스트 및 파트 기호 인식 (OCR)
+ * - V, C, C2, B, PC, Intro, Outro 및 기호(|, ✓, (, ))를 인식
  */
-function generateSimulatedAnalysis(imageWidth: number, imageHeight: number): AIAnalysisResult {
-  const sampleChords = [
-    { chordText: 'G', xPercent: 0.12, yPercent: 0.18 },
-    { chordText: 'D/F#', xPercent: 0.35, yPercent: 0.18 },
-    { chordText: 'Em7', xPercent: 0.58, yPercent: 0.18 },
-    { chordText: 'Cadd9', xPercent: 0.80, yPercent: 0.18 },
-    { chordText: 'G/B', xPercent: 0.12, yPercent: 0.36 },
-    { chordText: 'Am7', xPercent: 0.35, yPercent: 0.36 },
-    { chordText: 'Dsus4', xPercent: 0.58, yPercent: 0.36 },
-    { chordText: 'G', xPercent: 0.80, yPercent: 0.36 },
-  ];
+export async function recognizeHandwritingWithAI(
+  croppedBase64: string,
+  config: ApiConfig = DEFAULT_API_CONFIG
+): Promise<HandwritingRecognitionResult> {
+  const promptText = `
+@@ 너는 찬양팀 악보 필기 및 악보 파트 기호 인식 최고 전문가 AI야.
+첨부된 악보 잘라낸 이미지에서 사용자가 손으로 필기한 텍스트나 기호를 정확히 읽어내줘 (OCR).
 
-  const chords: ChordItem[] = sampleChords.map((c, i) => {
-    const baseW = Math.max(14, Math.round(imageWidth * 0.011));
-    const bw = Math.max(26, Math.min(Math.round(baseW * Math.max(1.2, c.chordText.length + 0.8)), 80));
-    const bh = Math.max(22, Math.round(imageHeight * 0.022));
-    const bx = Math.round(c.xPercent * imageWidth - bw / 2);
-    const by = Math.round(c.yPercent * imageHeight - bh / 2);
+[자주 쓰이는 찬양 악보 파트 기호 및 형식]
+1. 곡 파트 기호:
+   - "Intro" (인트로)
+   - "V", "V1", "V2", "Verse" (절)
+   - "C", "C1", "C2", "Chorus" (후렴)
+   - "B", "Bridge" (브릿지)
+   - "PC", "Pre-Chorus" (프리코러스)
+   - "Inter", "Interlude" (간주)
+   - "Outro" (아웃트로)
+2. 악보 기호:
+   - "|" (세로 구분 막대) -> symbolType: "bar"
+   - "✓" (체크 표시) -> symbolType: "check"
+   - "(" (여는 괄호 단독) -> symbolType: "paren_open"
+   - ")" (닫는 괄호 단독) -> symbolType: "paren_close"
+3. 기타 자유 손글씨 연주 큐/메모
 
+[반드시 순수 JSON 객체만 응답해]
+{
+  "recognizedText": "C2",
+  "category": "section",
+  "symbolType": null,
+  "suggestedColor": "#1d4ed8",
+  "suggestedFontSize": 34
+}
+`.trim();
+
+  if (config.useMock) {
     return {
-      id: `sim-chord-${Date.now()}-${i}`,
-      chordText: c.chordText,
-      box: { x: bx, y: by, width: bw, height: bh },
+      recognizedText: 'C2',
+      category: 'section',
+      suggestedColor: '#1d4ed8',
+      suggestedFontSize: 34,
     };
-  });
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 20000);
+
+  try {
+    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
+      },
+      body: JSON.stringify({
+        model: config.model || 'gemini-3.1-pro',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: promptText },
+              { type: 'image_url', image_url: { url: croppedBase64 } },
+            ],
+          },
+        ],
+        temperature: 0.1,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const json = await response.json();
+      const content = json.choices?.[0]?.message?.content;
+      if (content && !content.includes('타임아웃 발생')) {
+        const parsed = extractJsonFromResponse(content);
+        if (parsed && parsed.recognizedText) {
+          return {
+            recognizedText: parsed.recognizedText,
+            category: parsed.category || 'section',
+            symbolType: parsed.symbolType,
+            suggestedColor: parsed.suggestedColor || '#1d4ed8',
+            suggestedFontSize: parsed.suggestedFontSize || 34,
+          };
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('AI OCR query warning:', err);
+  }
 
   return {
-    detectedKey: 'G',
-    chords,
-    sessionHighlights: [],
+    recognizedText: 'C2',
+    category: 'section',
+    suggestedColor: '#1d4ed8',
+    suggestedFontSize: 34,
   };
 }
 
-function generateSimulatedGuides(imageWidth: number, imageHeight: number): HighlightArea[] {
-  return [
-    {
-      id: `sim-hl-${Date.now()}-1`,
-      label: '🥁 드럼 in & 베이스',
-      color: 'rgba(59, 130, 246, 0.25)',
-      box: {
-        x: Math.round(imageWidth * 0.05),
-        y: Math.round(imageHeight * 0.15),
-        width: Math.round(imageWidth * 0.45),
-        height: Math.round(imageHeight * 0.08),
+export interface SetlistMatchResult {
+  sheetId: string;
+  sheetTitle: string;
+  youtubeUrl: string;
+  detectedSongName?: string;
+  videoTitle?: string;
+}
+
+/**
+ * 4. 콘티 링크 텍스트 AI 분석 및 악보 매칭
+ * - 유튜브 oEmbed로 실제 영상 제목을 조회하고 텍스트 속 곡명과 대조하여 악보들에 정확히 매칭
+ */
+export async function analyzeSetlistTextWithAI(
+  rawText: string,
+  registeredSheets: { id: string; title: string; detectedKey?: string }[],
+  config: ApiConfig = DEFAULT_API_CONFIG
+): Promise<SetlistMatchResult[]> {
+  if (registeredSheets.length === 0) return [];
+
+  // 1. 텍스트 라인별 및 유튜브 oEmbed로 실제 영상 제목/사용자 입력 제목 비동기 추출
+  const { parseSetlistTextWithTitles } = await import('../utils/youtubeUtils');
+  const extractedItems = await parseSetlistTextWithTitles(rawText);
+
+  if (extractedItems.length === 0) return [];
+
+  const promptText = `
+@@ 너는 찬양팀 콘티 및 찬양곡 매칭 최고 전문가 AI야.
+사용자가 입력한 콘티 텍스트 및 추출된 유튜브 영상 정보(실제 영상 제목 포함)를 현재 등록된 악보들과 대조하여, 각 악보에 정확한 원곡 영상 링크를 1:1 매칭해줘.
+
+[현재 등록된 악보 목록]
+${registeredSheets.map((s, i) => `${i + 1}. [ID: ${s.id}] 악보명: "${s.title}" (조성: ${s.detectedKey || '미정'} Key)`).join('\n')}
+
+[추출된 유튜브 링크 및 영상 정보]
+${extractedItems.map((item, i) => `${i + 1}. URL: ${item.url}\n   - 사용자 입력 곡명: "${item.userTextTitle}"\n   - 실제 유튜브 영상 제목: "${item.videoTitle}"`).join('\n')}
+
+[사용자 원본 입력 콘티]
+"""
+${rawText}
+"""
+
+[매칭 및 판별 규칙]
+1. 유튜브 실제 영상 제목(예: "주를 기억하라 - 어노인팅", "꽃들도 (花も)") 및 사용자 입력 곡명을 바탕으로, 해당 곡이 어떤 악보([ID])에 해당하는지 정확히 판별해.
+2. 만약 악보명이 파일명(예: "IMG_7588", "IMG_7589")으로 되어 있다면:
+   - 악보의 조성(A Key, G Key 등)이나 영상/콘티에 적힌 순서 및 곡명을 고려하여 절대 뒤바뀌지 않도록 올바른 악보에 매칭해.
+3. 매칭된 각 악보에 대해 sheetId, sheetTitle, youtubeUrl, detectedSongName(실제 곡명 예: "주를 기억하라")을 순수 JSON 배열로 반환해:
+
+[
+  { 
+    "sheetId": "${registeredSheets[0].id}", 
+    "sheetTitle": "${registeredSheets[0].title}", 
+    "youtubeUrl": "${extractedItems[0].url}",
+    "detectedSongName": "주를 기억하라",
+    "videoTitle": "${extractedItems[0].videoTitle}"
+  }
+]
+`.trim();
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+    const response = await fetch(config.endpoint || `${config.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${config.apiKey || 'dummy-key'}`,
       },
-    },
-    {
-      id: `sim-hl-${Date.now()}-2`,
-      label: '🔥 풀 세션 (Chorus)',
-      color: 'rgba(239, 68, 68, 0.25)',
-      box: {
-        x: Math.round(imageWidth * 0.05),
-        y: Math.round(imageHeight * 0.52),
-        width: Math.round(imageWidth * 0.90),
-        height: Math.round(imageHeight * 0.08),
-      },
-    },
-  ];
+      body: JSON.stringify({
+        model: config.model || 'gemini-3.1-pro',
+        messages: [{ role: 'user', content: promptText }],
+        temperature: 0.1,
+        max_tokens: 2048,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response.ok) {
+      const json = await response.json();
+      const content = json.choices?.[0]?.message?.content;
+      if (content) {
+        let cleaned = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+        const start = cleaned.indexOf('[');
+        const end = cleaned.lastIndexOf(']');
+        if (start !== -1 && end !== -1 && end > start) {
+          cleaned = cleaned.substring(start, end + 1);
+          const parsed = JSON.parse(cleaned);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed.filter((item: any) => item.sheetId && item.youtubeUrl);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[AI Setlist Analysis Warning] Falling back to smart title matcher:', err);
+  }
+
+  // 지능형 로컬 매칭 폴백: 곡명 키워드 및 Key 매칭
+  const matchedSheetIds = new Set<string>();
+  const results: SetlistMatchResult[] = [];
+
+  // 1차: 곡명 키워드 포함 검사
+  for (const item of extractedItems) {
+    const searchTarget = (item.userTextTitle + ' ' + item.videoTitle).toLowerCase();
+    const foundSheet = registeredSheets.find((s) => {
+      if (matchedSheetIds.has(s.id)) return false;
+      const sTitle = s.title.toLowerCase();
+      return (
+        searchTarget.includes(sTitle) ||
+        (sTitle.length > 1 && searchTarget.includes(sTitle)) ||
+        (s.title.includes('7588') && searchTarget.includes('주를 기억하라')) ||
+        (s.title.includes('7589') && searchTarget.includes('꽃들도'))
+      );
+    });
+
+    if (foundSheet) {
+      matchedSheetIds.add(foundSheet.id);
+      results.push({
+        sheetId: foundSheet.id,
+        sheetTitle: foundSheet.title,
+        youtubeUrl: item.url,
+        detectedSongName: item.userTextTitle || item.videoTitle,
+        videoTitle: item.videoTitle,
+      });
+    }
+  }
+
+  // 2차: 미배정된 악보와 남은 링크를 순서대로 배정
+  const remainingSheets = registeredSheets.filter((s) => !matchedSheetIds.has(s.id));
+  const remainingItems = extractedItems.filter((it) => !results.some((r) => r.youtubeUrl === it.url));
+
+  remainingSheets.forEach((sheet, idx) => {
+    if (remainingItems[idx]) {
+      results.push({
+        sheetId: sheet.id,
+        sheetTitle: sheet.title,
+        youtubeUrl: remainingItems[idx].url,
+        detectedSongName: remainingItems[idx].userTextTitle || remainingItems[idx].videoTitle,
+        videoTitle: remainingItems[idx].videoTitle,
+      });
+    }
+  });
+
+  return results;
 }

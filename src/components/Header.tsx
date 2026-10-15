@@ -6,7 +6,8 @@ import {
   Moon, 
   Settings, 
   Save, 
-  CheckCircle2
+  CheckCircle2,
+  Youtube
 } from 'lucide-react';
 import { useSheetStore } from '../store/useSheetStore';
 
@@ -26,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
   } = useSheetStore();
 
   return (
-    <header className="h-16 bg-white dark:bg-zinc-900 border-b border-slate-200 dark:border-zinc-800 px-5 flex items-center justify-between select-none shadow-sm transition-colors duration-200">
+    <header className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-5 flex items-center justify-between select-none shadow-sm transition-colors duration-200">
       {/* 로고 및 프로그램 타이틀 */}
       <div className="flex items-center gap-3">
         <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/20 text-white">
@@ -64,7 +65,17 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
           ) : (
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
           )}
-          <span className="font-medium text-[11px] font-['Jua'] tracking-wide">{autoSaveMessage}</span>
+          <span className="font-medium text-[11px] tracking-wide">{autoSaveMessage}</span>
+        </button>
+
+        {/* 콘티 링크 업로드 버튼 (푸른 하늘색 UI) */}
+        <button
+          onClick={() => useSheetStore.getState().setIsSetlistModalOpen(true)}
+          className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-lg bg-sky-500/10 hover:bg-sky-500/20 text-sky-700 dark:text-sky-300 border border-sky-500/40 hover:border-sky-500 shadow-sm active:scale-95 transition-all"
+          title="유튜브 링크 및 콘티 텍스트를 입력하여 각 악보에 원곡 영상을 배정하고 다운로드합니다"
+        >
+          <Youtube className="w-4 h-4 text-sky-500 dark:text-sky-400" />
+          <span>콘티 링크 업로드</span>
         </button>
 
         {/* 연주자용 풀스크린 슬라이드 쇼 (PPT 모드) 버튼 */}
@@ -79,9 +90,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenSettings }) => {
           title={sheets.length > 0 ? "연주자용 전체화면 슬라이드 쇼 실행 (F11/방향키)" : "악보를 먼저 등록해주세요"}
         >
           <Presentation className="w-4 h-4" />
-          <span className="font-['Jua']">PPT 슬라이드 쇼</span>
+          <span>PPT 슬라이드 쇼</span>
           {sheets.length > 0 && (
-            <span className="text-xs px-2 py-0.5 rounded bg-black/10 dark:bg-black/20 text-slate-900 font-['Jua'] tracking-wide">
+            <span className="text-xs px-2 py-0.5 rounded bg-black/10 dark:bg-black/20 text-slate-900 tracking-wide">
               {sheets.length}곡
             </span>
           )}

@@ -273,7 +273,8 @@ export async function renderTransposedSheetMusic({
         ctx.fill();
       }
 
-      ctx.font = `bold ${fontSize}px 'Jua', sans-serif`;
+      const fontChoice = tb.fontFamily || 'Jua';
+      ctx.font = `bold ${fontSize}px '${fontChoice}', sans-serif`;
       ctx.fillStyle = textColor;
       ctx.textBaseline = 'top';
       ctx.textAlign = 'left';
@@ -299,10 +300,13 @@ export async function renderTransposedSheetMusic({
       const ah = box.height <= 1 ? box.height * height : box.height;
 
       const color = anno.color || '#ef4444'; // 기본 빨강
+      const defaultStroke = Math.max(2, Math.min(8, Math.round(Math.min(aw, ah) * 0.12)));
+      const strokeWidth = anno.strokeWidth || defaultStroke || 4;
 
       ctx.save();
       ctx.strokeStyle = color;
       ctx.fillStyle = color;
+      ctx.lineWidth = strokeWidth;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -311,7 +315,6 @@ export async function renderTransposedSheetMusic({
 
       switch (anno.iconType) {
         case 'bar': // 세로 막대기 |
-          ctx.lineWidth = Math.max(3, Math.round(aw * 0.35));
           ctx.beginPath();
           ctx.moveTo(cx, ay + 2);
           ctx.lineTo(cx, ay + ah - 2);
@@ -319,7 +322,6 @@ export async function renderTransposedSheetMusic({
           break;
 
         case 'check': // 롱 테일 체크마크 ✓ (한쪽이 더 긴 체크)
-          ctx.lineWidth = Math.max(3, Math.round(Math.min(aw, ah) * 0.12));
           ctx.beginPath();
           ctx.moveTo(ax + aw * 0.15, ay + ah * 0.52);
           ctx.lineTo(ax + aw * 0.40, ay + ah * 0.82);
@@ -327,17 +329,17 @@ export async function renderTransposedSheetMusic({
           ctx.stroke();
           break;
 
-        case 'paren_open': // 여는 괄호 (
-          ctx.lineWidth = Math.max(3, Math.round(aw * 0.22));
+        case 'paren_open': // 여는 괄호 ( - 상하로 늘어나도 박스를 벗어나지 않는 베지에 곡선
           ctx.beginPath();
-          ctx.arc(ax + aw * 0.85, cy, ah * 0.48, Math.PI * 0.65, Math.PI * 1.35, false);
+          ctx.moveTo(ax + aw * 0.82, ay + 2);
+          ctx.quadraticCurveTo(ax + aw * 0.08, cy, ax + aw * 0.82, ay + ah - 2);
           ctx.stroke();
           break;
 
-        case 'paren_close': // 닫는 괄호 )
-          ctx.lineWidth = Math.max(3, Math.round(aw * 0.22));
+        case 'paren_close': // 닫는 괄호 ) - 상하로 늘어나도 박스를 벗어나지 않는 베지에 곡선
           ctx.beginPath();
-          ctx.arc(ax + aw * 0.15, cy, ah * 0.48, Math.PI * 1.65, Math.PI * 0.35, false);
+          ctx.moveTo(ax + aw * 0.18, ay + 2);
+          ctx.quadraticCurveTo(ax + aw * 0.92, cy, ax + aw * 0.18, ay + ah - 2);
           ctx.stroke();
           break;
       }

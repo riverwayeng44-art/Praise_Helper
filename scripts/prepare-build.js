@@ -4,7 +4,7 @@ const indexHtmlTemplate = `<!doctype html>
 <html lang="ko" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="./music.svg" />
+    <link rel="icon" type="image/png" href="./icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>찬양팀 콘티 도우미 - Praise Helper</title>
     <style>
@@ -15,8 +15,11 @@ const indexHtmlTemplate = `<!doctype html>
         font-style: normal;
         font-display: swap;
       }
+      :root {
+        --app-font: 'Jua', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      }
       * {
-        font-family: 'Jua', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-family: var(--app-font);
       }
       /* Custom scrollbar */
       ::-webkit-scrollbar {
@@ -24,17 +27,17 @@ const indexHtmlTemplate = `<!doctype html>
         height: 8px;
       }
       html.dark ::-webkit-scrollbar-track {
-        background: #09090b;
+        background: #0f172a;
       }
       html.dark ::-webkit-scrollbar-thumb {
-        background: #27272a;
+        background: #334155;
         border-radius: 4px;
       }
       html.dark ::-webkit-scrollbar-thumb:hover {
-        background: #3f3f46;
+        background: #475569;
       }
       html.light ::-webkit-scrollbar-track {
-        background: #f8fafc;
+        background: #f1f5f9;
       }
       html.light ::-webkit-scrollbar-thumb {
         background: #cbd5e1;
@@ -44,8 +47,16 @@ const indexHtmlTemplate = `<!doctype html>
         background: #94a3b8;
       }
     </style>
+    <script>
+      try {
+        var savedFont = localStorage.getItem('praise_app_font_family');
+        if (savedFont) {
+          document.documentElement.style.setProperty('--app-font', savedFont);
+        }
+      } catch (e) {}
+    </script>
   </head>
-  <body class="bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 antialiased select-none overflow-hidden h-screen w-screen transition-colors duration-200">
+  <body class="bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 antialiased select-none overflow-hidden h-screen w-screen transition-colors duration-200">
     <div id="root" class="h-full w-full"></div>
     <script type="module" src="./src/main.tsx"></script>
   </body>

@@ -36,6 +36,7 @@ interface SheetStoreState {
   reorderSheets: (fromIndex: number, toIndex: number) => void;
   setActiveSheetId: (id: string) => void;
   updateSheetTitle: (sheetId: string, title: string) => Promise<void>;
+  updateSheetOriginalImage: (sheetId: string, newOriginalImageUrl: string) => Promise<void>;
   setSheetKey: (id: string, targetKey: string) => Promise<void>;
   analyzeSheet: (id: string, forceMock?: boolean) => Promise<void>;
   generateGuides: (id: string) => Promise<void>;
@@ -77,6 +78,17 @@ interface SheetStoreState {
   prevSlide: () => void;
   setSlideIndex: (index: number) => void;
 
+  // 원곡 영상 및 콘티 링크 관련 상태 및 액션
+  isSetlistModalOpen: boolean;
+  isVideoPlayerOpen: boolean;
+  videoPlayingSheet: SheetMusicData | null;
+  setIsSetlistModalOpen: (open: boolean) => void;
+  openVideoPlayer: (sheet: SheetMusicData) => void;
+  closeVideoPlayer: () => void;
+  setSheetVideoUrl: (sheetId: string, url: string) => Promise<void>;
+  downloadSheetVideo: (sheetId: string) => Promise<void>;
+  downloadAllVideos: () => Promise<void>;
+
   // 설정 및 테마
   setTheme: (theme: 'dark' | 'light') => void;
   setApiConfig: (config: Partial<ApiConfig>) => void;
@@ -102,7 +114,6 @@ async function getOrLoadImage(url: string): Promise<HTMLImageElement> {
 }
 
 function applyThemeToDOM(theme: 'dark' | 'light') {
-  if (typeof document === 'undefined') return;
   if (theme === 'dark') {
     document.documentElement.classList.add('dark');
     document.documentElement.classList.remove('light');
@@ -116,12 +127,6 @@ function applyThemeToDOM(theme: 'dark' | 'light') {
   }
 }
 
-const initialTheme: 'dark' | 'light' = 
-  (typeof window !== 'undefined' && (localStorage.getItem('praise_helper_theme') as 'dark' | 'light')) || 'light';
-if (typeof document !== 'undefined') {
-  applyThemeToDOM(initialTheme);
-}
-
 export const useSheetStore = create<SheetStoreState>((set, get) => ({
   sheets: [],
   activeSheetId: null,
@@ -129,7 +134,7 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
   isSlideMode: false,
   slideIndex: 0,
   isEditMode: false,
-  theme: initialTheme,
+  theme: 'dark',
   apiConfig: DEFAULT_API_CONFIG,
   toastMessage: null,
 
@@ -138,7 +143,41 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
   autoSaveMessage: '자동 저장 준비됨',
   isLoadedFromStorage: false,
 
+  // 원곡 영상 관련 초기 상태
+  isSetlistModalOpen: false,
+  isVideoPlayerOpen: false,
+  videoPlayingSheet: null,
+
   initFromStorage: async () => {
+    // Electron IPC 다운로드 진행상황 리스너 등록
+    const api = (window as any).electronAPI;
+    if (api && api.onDownloadProgress) {
+      api.onDownloadProgress((data: any) => {
+        const { sheetId, progress, status, filePath } = data;
+        set((state) => ({
+          sheets: state.sheets.map((s) =>
+            s.id === sheetId
+              ? {
+                  ...s,
+                  videoDownloadStatus: status,
+                  videoDownloadProgress: progress,
+                  localVideoPath: filePath || s.localVideoPath,
+                }
+              : s
+          ),
+          videoPlayingSheet:
+            state.videoPlayingSheet && state.videoPlayingSheet.id === sheetId
+              ? {
+                  ...state.videoPlayingSheet,
+                  videoDownloadStatus: status,
+                  videoDownloadProgress: progress,
+                  localVideoPath: filePath || state.videoPlayingSheet.localVideoPath,
+                }
+              : state.videoPlayingSheet,
+        }));
+      });
+    }
+
     try {
       const saved = await loadAppState();
       if (saved && saved.sheets && saved.sheets.length > 0) {
@@ -148,15 +187,29 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
           activeSheetId: saved.sheets[0]?.id || null,
           showHighlights: saved.showHighlights ?? true,
           theme: saved.theme || 'dark',
-          apiConfig: {
-            ...DEFAULT_API_CONFIG,
-            ...(saved.apiConfig || {}),
-          },
+          apiConfig: saved.apiConfig || DEFAULT_API_CONFIG,
           lastSavedAt: saved.lastSavedAt || Date.now(),
           isDirty: false,
           autoSaveMessage: '이전 작업 내용 복원됨',
           isLoadedFromStorage: true,
         });
+
+        // 로컬 비디오 파일 존재 여부 백그라운드 동기화
+        if (api && api.checkLocalVideo) {
+          for (const s of saved.sheets) {
+            api.checkLocalVideo(s.id).then((res: any) => {
+              if (res && res.exists && res.filePath) {
+                set((state) => ({
+                  sheets: state.sheets.map((sh) =>
+                    sh.id === s.id
+                      ? { ...sh, localVideoPath: res.filePath, videoDownloadStatus: 'completed' }
+                      : sh
+                  ),
+                }));
+              }
+            });
+          }
+        }
 
         // 저장된 악보들 캔버스 무손실 재렌더링
         for (const s of saved.sheets) {
@@ -219,11 +272,23 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     await get().saveToStorage();
   },
 
+  updateSheetOriginalImage: async (sheetId: string, newOriginalImageUrl: string) => {
+    const sheet = get().sheets.find((s) => s.id === sheetId);
+    if (sheet && imageCache.has(sheet.originalImageUrl)) {
+      imageCache.delete(sheet.originalImageUrl);
+    }
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId ? { ...s, originalImageUrl: newOriginalImageUrl } : s
+      ),
+      isDirty: true,
+    }));
+    await reRenderSingleSheet(sheetId, set, get);
+    await get().saveToStorage();
+  },
+
   setTheme: (theme: 'dark' | 'light') => {
     applyThemeToDOM(theme);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('praise_helper_theme', theme);
-    }
     set({ theme, isDirty: true });
     // 테마 변경 즉시 저장
     get().saveToStorage();
@@ -494,6 +559,11 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
                 detectedKey: result.detectedKey,
                 currentKey: result.detectedKey,
                 chords: result.chords,
+                title:
+                  result.detectedTitle &&
+                  (s.title === s.fileName || s.title.startsWith('IMG_') || s.title.startsWith('image') || s.title.startsWith('악보'))
+                    ? result.detectedTitle
+                    : s.title,
                 isAnalyzing: false,
               }
             : s
@@ -503,13 +573,15 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
 
       await reRenderSingleSheet(id, set, get);
       await get().saveToStorage();
-      get().setToastMessage(`✨ 악보 분석 완료: ${result.chords.length}개 코드 추출 (원곡: ${result.detectedKey} Key)`);
-    } catch (err: any) {
+      const updatedSheet = get().sheets.find((s) => s.id === id);
+      const titleDisplay = updatedSheet?.title ? `[${updatedSheet.title}] ` : '';
+      get().setToastMessage(`✨ ${titleDisplay}악보 분석 완료: ${result.chords.length}개 코드 추출 (원곡: ${result.detectedKey} Key)`);
+    } catch (err) {
       console.error('Sheet analysis error:', err);
       set((state) => ({
         sheets: state.sheets.map((s) => (s.id === id ? { ...s, isAnalyzing: false } : s)),
       }));
-      get().setToastMessage(err?.message ? `⚠️ ${err.message}` : '⚠️ 악보 분석을 완료할 수 없습니다. 잠시 후 다시 시도해주세요.');
+      get().setToastMessage('⚠️ 악보 분석을 완료할 수 없습니다. 잠시 후 다시 시도해주세요.');
     }
   },
 
@@ -546,12 +618,12 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
       await reRenderSingleSheet(id, set, get);
       await get().saveToStorage();
       get().setToastMessage(`🥁 AI 세션 가이드 생성 완료: ${guides.length}개 연주 구간 추가됨`);
-    } catch (err: any) {
+    } catch (err) {
       console.error('Session guide generation error:', err);
       set((state) => ({
         sheets: state.sheets.map((s) => (s.id === id ? { ...s, isAnalyzing: false } : s)),
       }));
-      get().setToastMessage(err?.message ? `⚠️ ${err.message}` : '⚠️ 세션 가이드 생성 중 오류가 발생했습니다.');
+      get().setToastMessage('⚠️ 세션 가이드 생성 중 오류가 발생했습니다.');
     }
   },
 
@@ -922,6 +994,112 @@ export const useSheetStore = create<SheetStoreState>((set, get) => ({
     const { sheets } = get();
     if (index >= 0 && index < sheets.length) {
       set({ slideIndex: index, activeSheetId: sheets[index].id });
+    }
+  },
+
+  // 원곡 영상 및 콘티 링크 관련 액션
+  setIsSetlistModalOpen: (open: boolean) => {
+    set({ isSetlistModalOpen: open });
+  },
+
+  openVideoPlayer: (sheet: SheetMusicData) => {
+    set({ isVideoPlayerOpen: true, videoPlayingSheet: sheet });
+  },
+
+  closeVideoPlayer: () => {
+    set({ isVideoPlayerOpen: false, videoPlayingSheet: null });
+  },
+
+  setSheetVideoUrl: async (sheetId: string, url: string) => {
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? {
+              ...s,
+              videoUrl: url,
+              videoDownloadStatus: 'idle',
+              videoDownloadProgress: 0,
+            }
+          : s
+      ),
+      isDirty: true,
+    }));
+    await get().saveToStorage();
+  },
+
+  downloadSheetVideo: async (sheetId: string) => {
+    const sheet = get().sheets.find((s) => s.id === sheetId);
+    if (!sheet || !sheet.videoUrl) return;
+
+    set((state) => ({
+      sheets: state.sheets.map((s) =>
+        s.id === sheetId
+          ? { ...s, videoDownloadStatus: 'downloading', videoDownloadProgress: 0 }
+          : s
+      ),
+    }));
+
+    const api = (window as any).electronAPI;
+    if (api && api.downloadVideo) {
+      try {
+        const res = await api.downloadVideo(sheetId, sheet.videoUrl);
+        if (res && res.success && res.filePath) {
+          set((state) => ({
+            sheets: state.sheets.map((s) =>
+              s.id === sheetId
+                ? {
+                    ...s,
+                    localVideoPath: res.filePath,
+                    videoDownloadStatus: 'completed',
+                    videoDownloadProgress: 100,
+                  }
+                : s
+            ),
+            videoPlayingSheet:
+              state.videoPlayingSheet && state.videoPlayingSheet.id === sheetId
+                ? {
+                    ...state.videoPlayingSheet,
+                    localVideoPath: res.filePath,
+                    videoDownloadStatus: 'completed',
+                    videoDownloadProgress: 100,
+                  }
+                : state.videoPlayingSheet,
+            isDirty: true,
+          }));
+          await get().saveToStorage();
+          get().setToastMessage(`🎬 [${sheet.title}] 원곡 영상 다운로드가 완료되었습니다.`);
+        } else {
+          set((state) => ({
+            sheets: state.sheets.map((s) =>
+              s.id === sheetId ? { ...s, videoDownloadStatus: 'error' } : s
+            ),
+          }));
+        }
+      } catch (err) {
+        console.error('Download video error:', err);
+        set((state) => ({
+          sheets: state.sheets.map((s) =>
+            s.id === sheetId ? { ...s, videoDownloadStatus: 'error' } : s
+          ),
+        }));
+      }
+    } else {
+      // 웹 브라우저 환경: 로컬 파일 다운로드 대신 유튜브 스트리밍 플레이어 즉시 재생 지원 안내
+      set((state) => ({
+        sheets: state.sheets.map((s) =>
+          s.id === sheetId ? { ...s, videoDownloadStatus: 'idle', videoDownloadProgress: 0 } : s
+        ),
+      }));
+      get().setToastMessage('🌐 웹 환경에서는 YouTube 스트리밍 플레이어로 즉시 시청하실 수 있습니다. (오프라인 다운로드는 PC 전용 앱 기능)');
+    }
+  },
+
+  downloadAllVideos: async () => {
+    const { sheets } = get();
+    for (const sheet of sheets) {
+      if (sheet.videoUrl && sheet.videoDownloadStatus !== 'completed') {
+        get().downloadSheetVideo(sheet.id);
+      }
     }
   },
 }));

@@ -1,20 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { useSheetStore } from './store/useSheetStore';
 import { Header } from './components/Header';
 import { QueueSidebar } from './components/QueueSidebar';
 import { EditorView } from './components/EditorView';
 import { SlideShowModal } from './components/SlideShowModal';
 import { SettingsModal } from './components/SettingsModal';
+import { SetlistLinkModal } from './components/SetlistLinkModal';
+import { VideoPlayerModal } from './components/VideoPlayerModal';
+import { useSheetStore } from './store/useSheetStore';
 import { ensureFontLoaded } from './utils/canvasRenderer';
 
 export const App: React.FC = () => {
   const { 
     initFromStorage, 
-    saveToStorage, 
-    checkAndAutoSave, 
     addSampleSheet, 
-    theme,
-    isEditMode 
+    checkAndAutoSave, 
+    saveToStorage, 
+    isEditMode,
+    isSetlistModalOpen,
+    setIsSetlistModalOpen
   } = useSheetStore();
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -51,7 +54,7 @@ export const App: React.FC = () => {
   }, []);
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 font-sans select-none transition-colors duration-200">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 select-none transition-colors duration-200">
       {/* 1. 상단 글로벌 네비게이션 헤더 */}
       <Header onOpenSettings={() => setIsSettingsOpen(true)} />
 
@@ -64,11 +67,20 @@ export const App: React.FC = () => {
       {/* 3. 연주자용 풀스크린 슬라이드 쇼 (PPT 모드) */}
       <SlideShowModal />
 
-      {/* 4. 브릿지 서버 설정 모달 */}
+      {/* 4. 브릿지 서버 및 글꼴 설정 모달 */}
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+
+      {/* 5. 콘티 링크 업로드 및 AI 영상 매칭 모달 */}
+      <SetlistLinkModal
+        isOpen={isSetlistModalOpen}
+        onClose={() => setIsSetlistModalOpen(false)}
+      />
+
+      {/* 6. 전체화면 원곡 비디오 플레이어 */}
+      <VideoPlayerModal />
     </div>
   );
 };

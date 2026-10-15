@@ -87,11 +87,11 @@ export const AddHighlightModal: React.FC<AddHighlightModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-2xl shadow-2xl overflow-hidden select-none transition-colors duration-200">
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+      <div className="w-full max-w-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden select-none transition-colors duration-200">
+        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookmarkPlus className="w-5 h-5 text-amber-500" />
-            <h3 className="text-base font-bold text-slate-900 dark:text-zinc-100">
+            <h3 className="text-base font-bold text-slate-900 dark:text-slate-100">
               {initialHighlight ? '세션 가이드 수정' : '새 세션 가이드 추가'}
             </h3>
           </div>
@@ -103,7 +103,7 @@ export const AddHighlightModal: React.FC<AddHighlightModalProps> = ({
         <form onSubmit={handleSubmit} className="p-5 space-y-4">
           {/* 가이드 라벨 입력 */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
               가이드 명칭 (이모지 없이 깔끔하게 표기)
             </label>
             <input
@@ -111,21 +111,21 @@ export const AddHighlightModal: React.FC<AddHighlightModalProps> = ({
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               autoFocus
-              className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700 rounded-lg text-slate-900 dark:text-zinc-100 focus:outline-none focus:border-amber-500 font-bold"
+              className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg text-slate-900 dark:text-slate-100 focus:outline-none focus:border-amber-500 font-bold"
               placeholder="예: 드럼 in, 후렴 반복, 브레이크"
             />
           </div>
 
           {/* 프리셋 버튼 */}
           <div>
-            <label className="block text-[11px] text-slate-500 dark:text-zinc-400 mb-1.5">자주 쓰는 가이드 문구</label>
+            <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">자주 쓰는 가이드 문구</label>
             <div className="flex flex-wrap gap-1.5">
               {PRESET_LABELS.map((pLabel) => (
                 <button
                   type="button"
                   key={pLabel}
                   onClick={() => setLabel(pLabel)}
-                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 transition-colors"
+                  className="px-2.5 py-1 text-xs rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors"
                 >
                   {pLabel}
                 </button>
@@ -136,7 +136,7 @@ export const AddHighlightModal: React.FC<AddHighlightModalProps> = ({
           {/* 색상 선택기 */}
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
                 <Palette className="w-3.5 h-3.5 text-blue-500" />
                 테두리 및 배경 색상
               </label>
@@ -179,8 +179,8 @@ export const AddHighlightModal: React.FC<AddHighlightModalProps> = ({
 
           {/* 실시간 렌더링 미리보기 */}
           <div className="pt-2">
-            <label className="block text-[11px] text-slate-500 dark:text-zinc-400 mb-1">악보 위 실제 표시 미리보기</label>
-            <div className="relative p-6 rounded-xl border border-dashed border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 flex flex-col items-center justify-center">
+            <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1">악보 위 실제 표시 미리보기</label>
+            <div className="relative p-6 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 flex flex-col items-center justify-center">
               {/* 바깥 상단 접촉 뱃지 */}
               <div className="w-full relative">
                 <div
@@ -213,7 +213,7 @@ export const AddHighlightModal: React.FC<AddHighlightModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+              className="px-4 py-2 text-xs font-semibold rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
             >
               취소
             </button>
